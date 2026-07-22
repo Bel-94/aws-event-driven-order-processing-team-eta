@@ -1,0 +1,156 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Week 1  API Gateway entry point for Event-Driven Order Processing.
+  Exposes POST /orders and proxies requests to the Order Intake Lambda.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: order-processing
+    Description: Prefix used in resource names and tags.
+
+  StageName:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: API stage (appears in the invoke URL).
+
+  # Prefer ARN when you have it. Name works if the function is in the same account/region.
+  OrderIntakeFunctionArn:
+    Type: String
+    Default: ""
+    Description: >
+      Full ARN of the Order Intake Lambda
+      (e.g. arn:aws:lambda:us-east-1:123456789012:function:order-intake).
+      Leave empty only if you pass OrderIntakeFunctionName instead.
+
+  OrderIntakeFunctionName:
+    Type: String
+    Default: ""
+    Description: >
+      Function name of Order Intake Lambda if you do not have the ARN yet.
+      Example: order-intake
+
+Conditions:
+  HasFunctionArn: !Not [!Equals [!Ref OrderIntakeFunctionArn, ""]]
+  HasFunctionName: !Not [!Equals [!Ref OrderIntakeFunctionName, ""]]
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # 1. The API container
+  # ---------------------------------------------------------------------------
+  OrdersRestApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub "${ProjectName}-orders-api"
+      Description: Week 1 entry point. POST /orders → Order Intake Lambda
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Week
+          Value: "1"
+        - Key: Owner
+          Value: api-gateway
+
+  # ---------------------------------------------------------------------------
+  # 2. Path: /orders  (child of the API root "/")
+  # ---------------------------------------------------------------------------
+  OrdersResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref OrdersRestApi
+      ParentId: !GetAtt OrdersRestApi.RootResourceId
+      PathPart: orders
+
+  # ---------------------------------------------------------------------------
+  # 3 + 4. POST /orders with Lambda PROXY integration
+  # ---------------------------------------------------------------------------
+  OrdersPostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref OrdersRestApi
+      ResourceId: !Ref OrdersResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      ApiKeyRequired: false
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${FnArn}/invocations"
+          - FnArn: !If
+              - HasFunctionArn
+              - !Ref OrderIntakeFunctionArn
+              - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${OrderIntakeFunctionName}"
+
+  # ---------------------------------------------------------------------------
+  # 5. Deployment + stage 
+  #
+  # Deployment is a snapshot of the API config. Stage is the named URL segment
+  # (e.g. /dev). Without these, the API exists but is not callable.
+  # ---------------------------------------------------------------------------
+  OrdersApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - OrdersPostMethod
+    Properties:
+      RestApiId: !Ref OrdersRestApi
+      Description: !Sub "Deploy ${ProjectName} orders API"
+
+  OrdersApiStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      StageName: !Ref StageName
+      RestApiId: !Ref OrdersRestApi
+      DeploymentId: !Ref OrdersApiDeployment
+      Description: !Sub "${ProjectName} ${StageName} stage"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Week
+          Value: "1"
+
+  # ---------------------------------------------------------------------------
+  # 6. Permission: allow THIS API to invoke Order Intake Lambda
+  #
+  # Without this, API Gateway gets 500 and CloudWatch shows AccessDenied.
+  # SourceArn is scoped to this API + POST /orders so other APIs cannot invoke it.
+  # ---------------------------------------------------------------------------
+  OrderIntakeInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !If
+        - HasFunctionArn
+        - !Ref OrderIntakeFunctionArn
+        - !Ref OrderIntakeFunctionName
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub
+        - "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiId}/*/POST/orders"
+        - ApiId: !Ref OrdersRestApi
+
+Outputs:
+  ApiId:
+    Description: Rest API ID
+    Value: !Ref OrdersRestApi
+    Export:
+      Name: !Sub "${ProjectName}-ApiId"
+
+  OrdersPostUrl:
+    Description: Full URL for POST /orders (share this for Week 1 demo)
+    Value: !Sub
+      - "https://${ApiId}.execute-api.${AWS::Region}.amazonaws.com/${Stage}/orders"
+      - ApiId: !Ref OrdersRestApi
+        Stage: !Ref StageName
+    Export:
+      Name: !Sub "${ProjectName}-OrdersPostUrl"
+
+  RootUrl:
+    Description: API stage base URL
+    Value: !Sub
+      - "https://${ApiId}.execute-api.${AWS::Region}.amazonaws.com/${Stage}"
+      - ApiId: !Ref OrdersRestApi
+        Stage: !Ref StageName

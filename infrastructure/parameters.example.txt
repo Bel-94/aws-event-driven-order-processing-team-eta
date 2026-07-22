@@ -1,0 +1,8 @@
+# Example parameters for `aws cloudformation deploy --parameter-overrides`
+# Copy values from your teammate once Order Intake Lambda exists.
+
+ProjectName=order-processing
+StageName=dev
+# Use ONE of the following:
+OrderIntakeFunctionArn=arn:aws:lambda:REGION:ACCOUNT_ID:function:order-intake
+# OrderIntakeFunctionName=order-intake
