@@ -1,0 +1,18 @@
+{
+  "orderId": "ord_8f14e45f-ea3c-4b1a-9d0a-2f6e1c9b7a12",
+  "customerId": "cust_3b2a1c9e",
+  "items": [
+    {
+      "sku": "SKU-12345",
+      "productName": "Wireless Mouse",
+      "quantity": 2,
+      "unitPrice": 19.99,
+      "currency": "USD"
+    }
+  ],
+  "status": "PENDING",
+  "createdAt": "2026-07-23T14:32:00Z",
+  "updatedAt": "2026-07-23T14:32:00Z",
+  "totalAmount": 39.98,
+  "currency": "USD"
+}
