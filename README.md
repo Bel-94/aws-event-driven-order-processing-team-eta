@@ -1,151 +1,153 @@
 # Event-Driven Order Processing on AWS
 
-A serverless, event-driven order processing system built on AWS. The goal is to understand how real-world systems decouple work using events instead of direct, sequential function calls — without needing to manage any servers.
+A serverless order processing system built on AWS. The project explores how event-driven architecture works in practice.. thus how services communicate through events rather than calling each other directly, and why that makes a system easier to scale, maintain, and recover from failure.
 
+The project runs across three weeks, with each week building on the previous week.
 
 ---
 
-## The Problem
+## Why event-driven
 
-Traditional order processing is often built as one big application: a customer places an order, and a single server does everything in sequence — validate the order, charge the card, update inventory, send a confirmation — all in one function call.
+The typical approach to order processing is one function that does everything in sequence: validate, charge, update stock, send a confirmation. That works until something slows down or breaks. A slow email step holds up the whole order. A bug in inventory can roll back a payment. You are also running a server around the clock regardless of how much traffic you actually have.
 
-This creates a few common problems:
-
-- **Slow response times** — the customer waits on every step, even slow ones like sending an email
-- **Fragile failures** — if one step breaks (e.g. inventory update), the whole transaction can fail or need complex rollback logic
-- **Wasted cost** — a server has to keep running 24/7 even if there are only a handful of orders a day
-- **Poor scaling** — scaling means scaling the *entire* app, even if only one part (like payments) is under load
-
-## The Solution: Event-Driven Architecture
-
-Instead of one process doing everything, an order triggers an **event**. Independent components ("consumers") listen for that event and each do their own job — without knowing about each other or depending on each other's implementation. This is called **loose coupling**, and it's the core idea this project is built around.
-
-If the notification service is slow or fails, it doesn't block payment processing or inventory updates. Each piece can scale, fail, and recover independently.
+With an event-driven approach, the system stores the order and fires a single event. From that point, separate services react independently. Payment does not wait on notifications. Inventory does not care what payment is doing. Each part can fail and retry on its own without taking down anything else. That independence is what this project is about.
 
 ---
 
 ## Architecture
 
+![Architecture Diagram](images/new_architecture.png)
+
+---
+
+## Weekly breakdown
+
+### Week 1 - Foundation
+
+![Week 1 Architecture](images/new_week_one.png)
+
+The first week focuses on getting the core order flow working end to end. A customer sends a request, the system validates it, and the order lands in the database.
+
+**What is built**
+
+API Gateway exposes the `POST /orders` endpoint. The Order Intake Lambda receives the request, validates it, and writes the order to DynamoDB with a status of `PENDING`. IAM permissions are scoped so the Lambda can only write to that specific table.
+
+**Quick start**
+
+Deploy the stacks in this order from CloudShell:
+- DynamoDB:
+```bash
+# 1. DynamoDB
+aws cloudformation deploy \
+  --template-file infrastructure/dynamodb.yaml \
+  --stack-name order-processing-db \
+  --parameter-overrides Environment=dev
 ```
-Customer
-   |
-   v
-API Gateway  (POST /orders)
-   |
-   v
-Lambda: Order Intake
-   |  - validates request
-   |  - writes order to DynamoDB (status: PENDING)
-   |  - publishes "OrderPlaced" event
-   v
-EventBridge  (event bus)
-   |
-   |------------------|------------------|
-   v                  v                  v
-Lambda:            Lambda:            Lambda:
-Payment            Inventory          Notification
-(simulated)         Update             (via SQS buffer)
-   |                  |                  |
-   v                  v                  v
-        DynamoDB (order status updates)
+- Lambda:
+```bash
+aws cloudformation deploy \
+  --template-file infrastructure/lambda-order-intake.yaml \
+  --stack-name order-processing-lambda \
+  --parameter-overrides Environment=dev DynamoDBStackName=order-processing-db \
+  --capabilities CAPABILITY_NAMED_IAM
+```
+- Upload function code: 
+```bash
+zip -j order-intake.zip lambdas/order-intake/index.js
+aws lambda update-function-code \
+  --function-name order-intake-dev \
+  --zip-file fileb://order-intake.zip
+```
+- Get the Lambda ARN first:
+```bash
+LAMBDA_ARN=$(aws cloudformation describe-stacks \
+  --stack-name order-processing-lambda \
+  --query "Stacks[0].Outputs[?OutputKey=='OrderIntakeFunctionArn'].OutputValue" \
+  --output text)
+```
+- API Gateway:
+```bash
+aws cloudformation deploy \
+  --template-file infrastructure/api-gateway.yaml \
+  --stack-name order-processing-api \
+  --parameter-overrides ProjectName=order-processing StageName=dev OrderIntakeFunctionArn=$LAMBDA_ARN
 ```
 
-### Services Used, and Why
-
-| Service | Role | Why this one |
-|---|---|---|
-| **API Gateway** | Entry point for order requests | Avoids running/managing our own web server |
-| **Lambda** | Runs all our processing code | No servers to patch or scale manually; pay only per invocation |
-| **EventBridge** | Central event bus routing events to consumers | Purpose-built for one event triggering multiple independent consumers, with routing rules |
-| **DynamoDB** | Stores orders and their status | Serverless-native, scales automatically, pairs naturally with Lambda |
-| **SQS** *(week 3)* | Buffers events before the notification consumer | Prevents lost events if a consumer is slow or temporarily failing |
-
-**Deliberately not used (yet):**
-- **Step Functions** — powerful for complex workflows, but adds orchestration syntax on top of everything else we're learning. Noted as a future improvement.
-- **SNS** — good for simple pub/sub, but EventBridge better fits multiple event *types* (`OrderPlaced`, `PaymentProcessed`, `OrderShipped`) with different routing rules.
-
-### Deployment Approach
-
-Most resources start in the **AWS Console** so the team can see and understand each piece as it is created. **API Gateway (Week 1)** is an exception: it is defined in **CloudFormation** (`infrastructure/api-gateway.yaml`) so the entry point is reviewable, repeatable, and easy to share via stack outputs. Broader IaC (SAM/CloudFormation for Lambda, DynamoDB, EventBridge, SQS) remains a natural next step (see Week 3 / Future Improvements).
-
-Architecture roadmap: [`docs/architecture-roadmap.png`](docs/architecture-roadmap.png) · Week 1 slice: [`docs/week-1-architecture.png`](docs/week-1-architecture.png)
+Full deployment steps and testing instructions: [`docs/lambda-order-intake-deployment.md`](docs/lambda-order-intake-deployment.md)
 
 ---
 
-## Project Timeline
+### Week 2 - Event-Driven Architecture
 
-### Week 1 — Foundation & Design
-**Goal:** Get one thin slice working end-to-end.
-- Design the event flow and architecture diagram
-- Set up API Gateway (`infrastructure/api-gateway.yaml`) + order-intake Lambda
-- Set up DynamoDB orders table
-- Demo: API call → Lambda → DynamoDB write
+![Week 2 Architecture](images/new_week_two.png)
 
-**Presentation 1:** Architecture diagram, live demo of placing an order, explanation of the problem event-driven design solves.
+The second week introduces EventBridge and transforms the system from a simple request-response flow into a proper event-driven architecture.
 
-### Week 2 — Event Routing & Consumers
-**Goal:** Build the event-driven core of the system.
-- Set up EventBridge event bus and rules
-- Order-intake Lambda now publishes an `OrderPlaced` event instead of doing everything itself
-- Build consumer Lambdas: payment (simulated), inventory update, notification
-- Each consumer independently updates order status in DynamoDB
+**What is built**
 
-**Presentation 2:** Live demo of one event triggering multiple independent processes; explanation of loose coupling and why it matters.
+EventBridge is introduced as the event bus. The Order Intake Lambda now publishes an `OrderPlaced` event after writing to DynamoDB instead of handling everything itself. Three independent consumer Lambdas are added **(Payment Processing, Inventory Management, and Notification Service)** each reacting to the same event and updating order status in DynamoDB on their own.
 
-### Week 3 — Resilience & Wrap-Up
-**Goal:** Add production-style thinking and finish the story.
-- Add SQS buffer before the notification consumer
-- Demonstrate a simulated failure and recovery (retry / DLQ concept)
-- Review and tighten IAM permissions (least privilege)
-- Final polish: simple frontend or Postman collection for the demo
-
-**Presentation 3:** Full end-to-end demo, failure scenario demo, retrospective on lessons learned and what we'd add with more time (Step Functions, real payment gateway, CloudFormation).
+Security is also introduced this week. Cognito handles user authentication on the API. KMS encrypts data stored in DynamoDB. Secrets Manager holds any credentials the Lambdas need. API Gateway is configured with HTTPS enforcement, request validation, and rate limiting. CloudTrail and CloudWatch are enabled for auditing and monitoring.
 
 ---
 
-## Team & Roles
+### Week 3 - Production Readiness
 
+![Week 3 Architecture](images/new_week_three.png)
 
+The final week focuses on resilience and hardening the system for production.
 
-*(Roles are merged/split depending on team size — see `/docs/roles.md` for detail.)*
+**What is built**
+
+SQS is added as a buffer before the Notification Lambda so that traffic spikes and temporary failures do not drop events. A Dead Letter Queue captures any messages that fail repeatedly so nothing is silently lost. IAM policies were reviewed and tightened across all functions.
+
+On the security side, AWS WAF is added to protect the API against common attacks like SQL injection and XSS. Shield Standard provides baseline DDoS protection and Amazon Inspector continuously scans the Lambda functions for vulnerabilities.
 
 ---
 
-## Repository Structure
+## Services across all three weeks
+
+| Week | Services added |
+|---|---|
+| 1 | API Gateway, Lambda, DynamoDB, IAM |
+| 2 | EventBridge, Consumer Lambdas, Cognito, KMS, Secrets Manager, CloudTrail, CloudWatch |
+| 3 | SQS, Dead Letter Queue, WAF, Shield Standard, Inspector |
+
+---
+
+## Repository structure
 
 ```
 .
-├── README.md
 ├── docs/
-│   ├── architecture-roadmap.png   # 3-week architecture roadmap
-│   ├── week-1-architecture.png    # Week 1 thin slice
-│   ├── roles.md
-│   └── event-schema.md
+│   ├── lambda-order-intake-deployment.md
+│   ├── architecture-roadmap.png
+│   └── week-1-architecture.png
+├── images/
+│   ├── new_architecture.png
+│   ├── new_week_one.png
+│   ├── new_week_two.png
+│   ├── new_week_three.png
+│   ├── three_week_plan.png
+│   └── week_one_plan.png
 ├── lambdas/
 │   ├── order-intake/
-│   │   └── index.js (or .py)
+│   │   └── index.js
 │   ├── payment-processor/
 │   │   └── index.js
 │   ├── inventory-update/
 │   │   └── index.js
 │   └── notification/
 │       └── index.js
-├── infrastructure/
-│   ├── api-gateway.yaml  # Week 1 — CloudFormation for POST /orders
-│   └── notes.md          # API Gateway ownership + deploy steps
-└── postman/
-    └── order-processing.postman_collection.json
+└── infrastructure/
+    ├── dynamodb.yaml
+    ├── lambda-order-intake.yaml
+    ├── api-gateway.yaml
+    ├── parameters.example.txt
+    └── valid_order_structure.json
 ```
 
 ---
 
-## Status
-
-🚧 In progress — see [Project Timeline](#project-timeline) above for current week.
-
-## Future Improvements
-
-- Migrate manual console setup to CloudFormation or AWS SAM
-- Replace simulated payment step with a real (sandboxed) payment gateway
-- Introduce Step Functions for more complex order workflows
-- Add a proper frontend instead of Postman-only testing
+## Challenges
+We will update this sectiona as and when we face challenges wih the project.
