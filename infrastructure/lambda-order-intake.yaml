@@ -1,0 +1,112 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Order Intake Lambda and its IAM execution role.
+  This function receives a validated order from API Gateway,
+  writes it to DynamoDB with status PENDING, and returns the new orderId.
+  Week 1 scope only — EventBridge publishing comes in Week 2.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Must match the environment used when deploying the DynamoDB stack.
+
+  DynamoDBStackName:
+    Type: String
+    Default: order-processing-db
+    Description: >
+      Name of the CloudFormation stack that created the DynamoDB table.
+      We use cross-stack references to pull the table name and ARN from it.
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # IAM execution role
+  # Least-privilege: only the exact DynamoDB action this function needs.
+  # CloudWatch Logs is included so we can actually see what happens at runtime.
+  # ---------------------------------------------------------------------------
+  OrderIntakeExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "order-intake-execution-role-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # Covers CreateLogGroup, CreateLogStream, PutLogEvents
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: OrderIntakeDynamoDBWrite
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  # PutItem is all we do in Week 1.
+                  # We will add UpdateItem here in Week 2 when consumers need it.
+                  - dynamodb:PutItem
+                Resource:
+                  - Fn::ImportValue: !Sub "${DynamoDBStackName}-OrdersTableArn"
+
+  # ---------------------------------------------------------------------------
+  # Lambda function
+  # Code lives in lambdas/order-intake/index.js and is zipped on deploy.
+  # ---------------------------------------------------------------------------
+  OrderIntakeFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "order-intake-${Environment}"
+      Description: >
+        Validates incoming orders from API Gateway and writes them
+        to DynamoDB with status PENDING.
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt OrderIntakeExecutionRole.Arn
+      Timeout: 10
+      MemorySize: 256
+      Environment:
+        Variables:
+          ORDERS_TABLE_NAME:
+            Fn::ImportValue: !Sub "${DynamoDBStackName}-OrdersTableName"
+      Code:
+        # Point this at the zip you upload, or use an S3 bucket.
+        # During development the AWS CLI --zip-file flag handles this automatically.
+        ZipFile: |
+          exports.handler = async () => ({
+            statusCode: 200,
+            body: JSON.stringify({ message: "placeholder — deploy real code via CLI" })
+          });
+      Tags:
+        - Key: Project
+          Value: order-processing
+        - Key: Week
+          Value: "1"
+        - Key: Owner
+          Value: lambda-order-intake
+
+Outputs:
+  OrderIntakeFunctionArn:
+    Description: ARN of the Order Intake Lambda — pass this to the API Gateway stack
+    Value: !GetAtt OrderIntakeFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-OrderIntakeFunctionArn"
+
+  OrderIntakeFunctionName:
+    Description: Name of the Order Intake Lambda
+    Value: !Ref OrderIntakeFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-OrderIntakeFunctionName"
+
+  OrderIntakeRoleArn:
+    Description: ARN of the Lambda execution role (useful for auditing permissions)
+    Value: !GetAtt OrderIntakeExecutionRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-OrderIntakeRoleArn"
