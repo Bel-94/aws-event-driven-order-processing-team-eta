@@ -2,6 +2,8 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   Week 1  API Gateway entry point for Event-Driven Order Processing.
   Exposes POST /orders and proxies requests to the Order Intake Lambda.
+  Week 3: stage-level access logging + method logging/metrics added
+  (requires observability.yaml deployed first — see OrdersApiStage).
 
 Parameters:
   ProjectName:
@@ -87,19 +89,16 @@ Resources:
               - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${OrderIntakeFunctionName}"
 
   # ---------------------------------------------------------------------------
-  # 5. Deployment + stage 
+  # 5. Deployment + stage
   #
   # Deployment is a snapshot of the API config. Stage is the named URL segment
   # (e.g. /dev). Without these, the API exists but is not callable.
+  #
+  # Week 3: AccessLogSetting + MethodSettings turn on API Gateway logging,
+  # which is OFF by default. DestinationArn imports the log group ARN from
+  # observability.yaml — that stack MUST be deployed before this one, or the
+  # ImportValue below will fail with "No export named ... found".
   # ---------------------------------------------------------------------------
-  OrdersApiDeployment:
-    Type: AWS::ApiGateway::Deployment
-    DependsOn:
-      - OrdersPostMethod
-    Properties:
-      RestApiId: !Ref OrdersRestApi
-      Description: !Sub "Deploy ${ProjectName} orders API"
-
   OrdersApiStage:
     Type: AWS::ApiGateway::Stage
     Properties:
@@ -107,11 +106,34 @@ Resources:
       RestApiId: !Ref OrdersRestApi
       DeploymentId: !Ref OrdersApiDeployment
       Description: !Sub "${ProjectName} ${StageName} stage"
+
+      AccessLogSetting:
+        DestinationArn: !ImportValue
+          Fn::Sub: "${ProjectName}-ApiGatewayAccessLogGroupArn"
+        Format: >
+          {
+            "requestId":"$context.requestId",
+            "ip":"$context.identity.sourceIp",
+            "httpMethod":"$context.httpMethod",
+            "resourcePath":"$context.resourcePath",
+            "status":"$context.status",
+            "responseTime":"$context.responseLatency"
+          }
+
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          LoggingLevel: INFO
+          MetricsEnabled: true
+          # Logs full request/response bodies — real order data included.
+          # Fine for demo week; set to false afterward.
+          DataTraceEnabled: true
+
       Tags:
         - Key: Project
           Value: !Ref ProjectName
         - Key: Week
-          Value: "1"
+          Value: "3"
 
   # ---------------------------------------------------------------------------
   # 6. Permission: allow THIS API to invoke Order Intake Lambda
@@ -131,6 +153,19 @@ Resources:
       SourceArn: !Sub
         - "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiId}/*/POST/orders"
         - ApiId: !Ref OrdersRestApi
+
+  # ---------------------------------------------------------------------------
+  # Deployment
+  # (moved above OrdersApiStage in read order only for grouping;
+  #  DependsOn still enforces correct creation order)
+  # ---------------------------------------------------------------------------
+  OrdersApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - OrdersPostMethod
+    Properties:
+      RestApiId: !Ref OrdersRestApi
+      Description: !Sub "Deploy ${ProjectName} orders API"
 
 Outputs:
   ApiId:
