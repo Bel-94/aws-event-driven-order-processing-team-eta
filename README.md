@@ -96,8 +96,12 @@ EventBridge is introduced as the event bus. The Order Intake Lambda now publishe
 
 **Still owned separately (not in the EventBridge PR)**
 
-- Cognito + API authorizer / request validation / throttling
 - Customer-managed KMS + Secrets Manager wiring
+
+**Auth & API Security (this track)**
+
+- Cognito + authorizer, body validation, throttling: `infrastructure/cognito.yaml`, updated `infrastructure/api-gateway.yaml`
+- Guide: [`docs/auth-api-security.md`](docs/auth-api-security.md)
 
 Security monitoring pieces (CloudTrail / CloudWatch) landed under Week 3 observability.
 

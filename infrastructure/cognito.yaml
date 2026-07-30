@@ -1,0 +1,123 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Cognito user pool for API authentication (Week 2 Auth & API Security).
+  Clients obtain a JWT (IdToken/AccessToken) and send it as
+  Authorization: Bearer <token> to API Gateway.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+
+  ProjectName:
+    Type: String
+    Default: order-processing
+
+  CallbackURLs:
+    Type: CommaDelimitedList
+    Default: "https://localhost/callback"
+    Description: >
+      OAuth callback URLs for the app client (Hosted UI / code flow).
+      Localhost is fine for Postman/manual demos.
+
+  LogoutURLs:
+    Type: CommaDelimitedList
+    Default: "https://localhost/logout"
+
+Resources:
+  OrdersUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "${ProjectName}-users-${Environment}"
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Required: true
+          Mutable: true
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Name: verified_email
+            Priority: 1
+      UserPoolTags:
+        Project: !Ref ProjectName
+        Week: "2"
+        Owner: auth-api-security
+
+  # Public app client (no client secret) — works with Postman / SPA-style demos.
+  OrdersUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub "${ProjectName}-api-client-${Environment}"
+      UserPoolId: !Ref OrdersUserPool
+      GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+      PreventUserExistenceErrors: ENABLED
+      SupportedIdentityProviders:
+        - COGNITO
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - profile
+      CallbackURLs: !Ref CallbackURLs
+      LogoutURLs: !Ref LogoutURLs
+      AccessTokenValidity: 1
+      IdTokenValidity: 1
+      RefreshTokenValidity: 30
+      TokenValidityUnits:
+        AccessToken: hours
+        IdToken: hours
+        RefreshToken: days
+
+  # Optional hosted UI domain prefix (must be globally unique in the region).
+  OrdersUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub "${ProjectName}-${Environment}-${AWS::AccountId}"
+      UserPoolId: !Ref OrdersUserPool
+
+Outputs:
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref OrdersUserPool
+    Export:
+      Name: !Sub "${AWS::StackName}-UserPoolId"
+
+  UserPoolArn:
+    Description: Cognito User Pool ARN — used by API Gateway authorizer
+    Value: !GetAtt OrdersUserPool.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-UserPoolArn"
+
+  UserPoolClientId:
+    Description: App client ID for obtaining tokens (Postman / frontend)
+    Value: !Ref OrdersUserPoolClient
+    Export:
+      Name: !Sub "${AWS::StackName}-UserPoolClientId"
+
+  HostedUiDomain:
+    Description: Cognito Hosted UI domain prefix
+    Value: !Ref OrdersUserPoolDomain
+    Export:
+      Name: !Sub "${AWS::StackName}-HostedUiDomain"
+
+  HostedUiUrl:
+    Description: Hosted UI base URL
+    Value: !Sub "https://${OrdersUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com"

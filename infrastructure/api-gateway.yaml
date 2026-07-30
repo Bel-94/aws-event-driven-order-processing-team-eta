@@ -1,9 +1,9 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  Week 1 API Gateway entry point for Event-Driven Order Processing.
-  Exposes POST /orders and proxies requests to the Order Intake Lambda.
-  Week 3 (optional): set EnableAccessLogging=true after deploying
-  infrastructure/observability.yaml to turn on access + method logging.
+  API Gateway entry point for Event-Driven Order Processing.
+  POST /orders -> Order Intake Lambda, with Cognito JWT auth,
+  request body validation, and stage throttling (Auth & API Security).
+  Optional Week 3 access logging via EnableAccessLogging=true.
 
 Parameters:
   ProjectName:
@@ -17,30 +17,41 @@ Parameters:
     AllowedValues: [dev, staging, prod]
     Description: API stage (appears in the invoke URL).
 
-  # Prefer ARN when you have it. Name works if the function is in the same account/region.
   OrderIntakeFunctionArn:
     Type: String
     Default: ""
     Description: >
-      Full ARN of the Order Intake Lambda
-      (e.g. arn:aws:lambda:us-east-1:123456789012:function:order-intake).
+      Full ARN of the Order Intake Lambda.
       Leave empty only if you pass OrderIntakeFunctionName instead.
 
   OrderIntakeFunctionName:
     Type: String
     Default: ""
+    Description: Function name of Order Intake Lambda if you do not have the ARN yet.
+
+  CognitoStackName:
+    Type: String
+    Default: order-processing-cognito
     Description: >
-      Function name of Order Intake Lambda if you do not have the ARN yet.
-      Example: order-intake
+      CloudFormation stack from infrastructure/cognito.yaml that exports
+      the User Pool ARN for the COGNITO_USER_POOLS authorizer.
 
   EnableAccessLogging:
     Type: String
     Default: "false"
     AllowedValues: ["true", "false"]
     Description: >
-      Set to true only after observability.yaml is deployed (exports the
-      access log group ARN). Leave false for Week 1 so API Gateway can
-      deploy independently.
+      Set to true only after observability.yaml is deployed.
+
+  ThrottleRateLimit:
+    Type: Number
+    Default: 10
+    Description: Steady-state requests per second for this stage (/*).
+
+  ThrottleBurstLimit:
+    Type: Number
+    Default: 20
+    Description: Burst concurrency for this stage (/*).
 
 Conditions:
   HasFunctionArn: !Not [!Equals [!Ref OrderIntakeFunctionArn, ""]]
@@ -48,14 +59,13 @@ Conditions:
   AccessLoggingEnabled: !Equals [!Ref EnableAccessLogging, "true"]
 
 Resources:
-  # ---------------------------------------------------------------------------
-  # 1. The API container
-  # ---------------------------------------------------------------------------
   OrdersRestApi:
     Type: AWS::ApiGateway::RestApi
     Properties:
       Name: !Sub "${ProjectName}-orders-api"
-      Description: Week 1 entry point. POST /orders → Order Intake Lambda
+      Description: >
+        POST /orders with Cognito auth, body validation, and throttling.
+        Clients always call HTTPS execute-api URLs (no HTTP endpoint).
       EndpointConfiguration:
         Types:
           - REGIONAL
@@ -63,13 +73,10 @@ Resources:
         - Key: Project
           Value: !Ref ProjectName
         - Key: Week
-          Value: "1"
+          Value: "2"
         - Key: Owner
           Value: api-gateway
 
-  # ---------------------------------------------------------------------------
-  # 2. Path: /orders  (child of the API root "/")
-  # ---------------------------------------------------------------------------
   OrdersResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -78,16 +85,88 @@ Resources:
       PathPart: orders
 
   # ---------------------------------------------------------------------------
-  # 3 + 4. POST /orders with Lambda PROXY integration
+  # Cognito JWT authorizer
   # ---------------------------------------------------------------------------
+  OrdersCognitoAuthorizer:
+    Type: AWS::ApiGateway::Authorizer
+    Properties:
+      Name: !Sub "${ProjectName}-cognito-authorizer"
+      RestApiId: !Ref OrdersRestApi
+      Type: COGNITO_USER_POOLS
+      IdentitySource: method.request.header.Authorization
+      ProviderARNs:
+        - Fn::ImportValue: !Sub "${CognitoStackName}-UserPoolArn"
+
+  # ---------------------------------------------------------------------------
+  # Request body validation (rejects bad JSON shapes before Lambda runs)
+  # ---------------------------------------------------------------------------
+  OrdersRequestValidator:
+    Type: AWS::ApiGateway::RequestValidator
+    Properties:
+      Name: !Sub "${ProjectName}-validate-body"
+      RestApiId: !Ref OrdersRestApi
+      ValidateRequestBody: true
+      ValidateRequestParameters: false
+
+  CreateOrderModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      RestApiId: !Ref OrdersRestApi
+      ContentType: application/json
+      Name: CreateOrderRequest
+      Description: Minimum body required to place an order
+      Schema:
+        $schema: "http://json-schema.org/draft-04/schema#"
+        title: CreateOrderRequest
+        type: object
+        required:
+          - customerId
+          - items
+        additionalProperties: true
+        properties:
+          customerId:
+            type: string
+            minLength: 1
+          currency:
+            type: string
+            pattern: "^[A-Z]{3}$"
+          items:
+            type: array
+            minItems: 1
+            items:
+              type: object
+              required:
+                - sku
+                - quantity
+                - unitPrice
+              properties:
+                sku:
+                  type: string
+                  minLength: 1
+                productName:
+                  type: string
+                quantity:
+                  type: integer
+                  minimum: 1
+                unitPrice:
+                  type: number
+                  minimum: 0
+                currency:
+                  type: string
+                  pattern: "^[A-Z]{3}$"
+
   OrdersPostMethod:
     Type: AWS::ApiGateway::Method
     Properties:
       RestApiId: !Ref OrdersRestApi
       ResourceId: !Ref OrdersResource
       HttpMethod: POST
-      AuthorizationType: NONE
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref OrdersCognitoAuthorizer
       ApiKeyRequired: false
+      RequestValidatorId: !Ref OrdersRequestValidator
+      RequestModels:
+        application/json: !Ref CreateOrderModel
       Integration:
         Type: AWS_PROXY
         IntegrationHttpMethod: POST
@@ -98,15 +177,17 @@ Resources:
               - !Ref OrderIntakeFunctionArn
               - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${OrderIntakeFunctionName}"
 
-  # ---------------------------------------------------------------------------
-  # 5. Deployment + stage
-  #
-  # Deployment is a snapshot of the API config. Stage is the named URL segment
-  # (e.g. /dev). Without these, the API exists but is not callable.
-  #
-  # Week 3 (optional): AccessLogSetting + MethodSettings when
-  # EnableAccessLogging=true. Requires observability.yaml export first.
-  # ---------------------------------------------------------------------------
+  OrdersApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - OrdersPostMethod
+      - OrdersCognitoAuthorizer
+      - OrdersRequestValidator
+      - CreateOrderModel
+    Properties:
+      RestApiId: !Ref OrdersRestApi
+      Description: !Sub "Deploy ${ProjectName} orders API (auth + validation)"
+
   OrdersApiStage:
     Type: AWS::ApiGateway::Stage
     Properties:
@@ -114,7 +195,20 @@ Resources:
       RestApiId: !Ref OrdersRestApi
       DeploymentId: !Ref OrdersApiDeployment
       Description: !Sub "${ProjectName} ${StageName} stage"
-
+      MethodSettings: !If
+        - AccessLoggingEnabled
+        - - ResourcePath: "/*"
+            HttpMethod: "*"
+            LoggingLevel: INFO
+            MetricsEnabled: true
+            DataTraceEnabled: true
+            ThrottlingRateLimit: !Ref ThrottleRateLimit
+            ThrottlingBurstLimit: !Ref ThrottleBurstLimit
+        - - ResourcePath: "/*"
+            HttpMethod: "*"
+            MetricsEnabled: true
+            ThrottlingRateLimit: !Ref ThrottleRateLimit
+            ThrottlingBurstLimit: !Ref ThrottleBurstLimit
       AccessLogSetting: !If
         - AccessLoggingEnabled
         - DestinationArn:
@@ -126,32 +220,16 @@ Resources:
               "httpMethod":"$context.httpMethod",
               "resourcePath":"$context.resourcePath",
               "status":"$context.status",
-              "responseTime":"$context.responseLatency"
+              "responseTime":"$context.responseLatency",
+              "user":"$context.authorizer.claims.sub"
             }
         - !Ref AWS::NoValue
-
-      MethodSettings: !If
-        - AccessLoggingEnabled
-        - - ResourcePath: "/*"
-            HttpMethod: "*"
-            LoggingLevel: INFO
-            MetricsEnabled: true
-            # Logs full request/response bodies — fine for demo; disable after.
-            DataTraceEnabled: true
-        - !Ref AWS::NoValue
-
       Tags:
         - Key: Project
           Value: !Ref ProjectName
         - Key: Week
-          Value: !If [AccessLoggingEnabled, "3", "1"]
+          Value: "2"
 
-  # ---------------------------------------------------------------------------
-  # 6. Permission: allow THIS API to invoke Order Intake Lambda
-  #
-  # Without this, API Gateway gets 500 and CloudWatch shows AccessDenied.
-  # SourceArn is scoped to this API + POST /orders so other APIs cannot invoke it.
-  # ---------------------------------------------------------------------------
   OrderIntakeInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -165,19 +243,6 @@ Resources:
         - "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiId}/*/POST/orders"
         - ApiId: !Ref OrdersRestApi
 
-  # ---------------------------------------------------------------------------
-  # Deployment
-  # (moved above OrdersApiStage in read order only for grouping;
-  #  DependsOn still enforces correct creation order)
-  # ---------------------------------------------------------------------------
-  OrdersApiDeployment:
-    Type: AWS::ApiGateway::Deployment
-    DependsOn:
-      - OrdersPostMethod
-    Properties:
-      RestApiId: !Ref OrdersRestApi
-      Description: !Sub "Deploy ${ProjectName} orders API"
-
 Outputs:
   ApiId:
     Description: Rest API ID
@@ -186,7 +251,7 @@ Outputs:
       Name: !Sub "${ProjectName}-ApiId"
 
   OrdersPostUrl:
-    Description: Full URL for POST /orders (share this for Week 1 demo)
+    Description: Full HTTPS URL for POST /orders (requires Cognito Bearer token)
     Value: !Sub
       - "https://${ApiId}.execute-api.${AWS::Region}.amazonaws.com/${Stage}/orders"
       - ApiId: !Ref OrdersRestApi
@@ -195,8 +260,12 @@ Outputs:
       Name: !Sub "${ProjectName}-OrdersPostUrl"
 
   RootUrl:
-    Description: API stage base URL
+    Description: API stage base URL (HTTPS only)
     Value: !Sub
       - "https://${ApiId}.execute-api.${AWS::Region}.amazonaws.com/${Stage}"
       - ApiId: !Ref OrdersRestApi
         Stage: !Ref StageName
+
+  CognitoAuthorizerId:
+    Description: Authorizer ID attached to POST /orders
+    Value: !Ref OrdersCognitoAuthorizer
