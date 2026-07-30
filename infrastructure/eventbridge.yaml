@@ -1,0 +1,110 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Week 2 — EventBridge custom bus and OrderPlaced routing rules.
+  Fans the same OrderPlaced event out to Payment, Inventory, and Notification
+  Lambdas. Deploy consumers.yaml first, then pass their function ARNs here.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+
+  ProjectName:
+    Type: String
+    Default: order-processing
+
+  PaymentFunctionArn:
+    Type: String
+    Description: ARN of the Payment consumer Lambda (from consumers stack output).
+
+  InventoryFunctionArn:
+    Type: String
+    Description: ARN of the Inventory consumer Lambda.
+
+  NotificationFunctionArn:
+    Type: String
+    Description: ARN of the Notification consumer Lambda.
+
+Resources:
+  # -------------------------------------------------------------------------
+  # Custom event bus (not the default bus — keeps project events isolated)
+  # -------------------------------------------------------------------------
+  OrderProcessingEventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub "${ProjectName}-${Environment}"
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Week
+          Value: "2"
+
+  # -------------------------------------------------------------------------
+  # Shared event pattern for OrderPlaced
+  # -------------------------------------------------------------------------
+  OrderPlacedRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${ProjectName}-order-placed-${Environment}"
+      Description: Route OrderPlaced events to all Week 2 consumers
+      EventBusName: !Ref OrderProcessingEventBus
+      State: ENABLED
+      EventPattern:
+        source:
+          - order.processing
+        detail-type:
+          - OrderPlaced
+      Targets:
+        - Id: PaymentProcessor
+          Arn: !Ref PaymentFunctionArn
+        - Id: InventoryUpdate
+          Arn: !Ref InventoryFunctionArn
+        - Id: NotificationService
+          Arn: !Ref NotificationFunctionArn
+
+  # -------------------------------------------------------------------------
+  # Allow EventBridge to invoke each consumer (resource-based policy)
+  # -------------------------------------------------------------------------
+  PaymentInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref PaymentFunctionArn
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt OrderPlacedRule.Arn
+
+  InventoryInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref InventoryFunctionArn
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt OrderPlacedRule.Arn
+
+  NotificationInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref NotificationFunctionArn
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt OrderPlacedRule.Arn
+
+Outputs:
+  EventBusName:
+    Description: Pass this to Order Intake as EVENT_BUS_NAME
+    Value: !Ref OrderProcessingEventBus
+    Export:
+      Name: !Sub "${AWS::StackName}-EventBusName"
+
+  EventBusArn:
+    Description: ARN for IAM events:PutEvents resource scope
+    Value: !GetAtt OrderProcessingEventBus.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-EventBusArn"
+
+  OrderPlacedRuleArn:
+    Description: ARN of the OrderPlaced routing rule
+    Value: !GetAtt OrderPlacedRule.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-OrderPlacedRuleArn"

@@ -1,9 +1,8 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   Order Intake Lambda and its IAM execution role.
-  This function receives a validated order from API Gateway,
-  writes it to DynamoDB with status PENDING, and returns the new orderId.
-  Week 1 scope only — EventBridge publishing comes in Week 2.
+  Week 2: validates order, writes PENDING to DynamoDB, then publishes
+  OrderPlaced to the custom EventBridge bus.
 
 Parameters:
   Environment:
@@ -20,15 +19,15 @@ Parameters:
     Default: order-processing-db
     Description: >
       Name of the CloudFormation stack that created the DynamoDB table.
-      We use cross-stack references to pull the table name and ARN from it.
+
+  EventBridgeStackName:
+    Type: String
+    Default: order-processing-events
+    Description: >
+      Name of the CloudFormation stack that created the EventBridge bus
+      (infrastructure/eventbridge.yaml). Used to import bus name and ARN.
 
 Resources:
-
-  # ---------------------------------------------------------------------------
-  # IAM execution role
-  # Least-privilege: only the exact DynamoDB action this function needs.
-  # CloudWatch Logs is included so we can actually see what happens at runtime.
-  # ---------------------------------------------------------------------------
   OrderIntakeExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -41,7 +40,6 @@ Resources:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
-        # Covers CreateLogGroup, CreateLogStream, PutLogEvents
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
         - PolicyName: OrderIntakeDynamoDBWrite
@@ -50,23 +48,25 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  # PutItem is all we do in Week 1.
-                  # We will add UpdateItem here in Week 2 when consumers need it.
                   - dynamodb:PutItem
                 Resource:
                   - Fn::ImportValue: !Sub "${DynamoDBStackName}-OrdersTableArn"
+        - PolicyName: OrderIntakeEventBridgePublish
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - events:PutEvents
+                Resource:
+                  - Fn::ImportValue: !Sub "${EventBridgeStackName}-EventBusArn"
 
-  # ---------------------------------------------------------------------------
-  # Lambda function
-  # Code lives in lambdas/order-intake/index.js and is zipped on deploy.
-  # ---------------------------------------------------------------------------
   OrderIntakeFunction:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub "order-intake-${Environment}"
       Description: >
-        Validates incoming orders from API Gateway and writes them
-        to DynamoDB with status PENDING.
+        Validates orders, writes PENDING to DynamoDB, publishes OrderPlaced.
       Runtime: nodejs20.x
       Handler: index.handler
       Role: !GetAtt OrderIntakeExecutionRole.Arn
@@ -76,9 +76,10 @@ Resources:
         Variables:
           ORDERS_TABLE_NAME:
             Fn::ImportValue: !Sub "${DynamoDBStackName}-OrdersTableName"
+          EVENT_BUS_NAME:
+            Fn::ImportValue: !Sub "${EventBridgeStackName}-EventBusName"
+          EVENT_SOURCE: order.processing
       Code:
-        # Point this at the zip you upload, or use an S3 bucket.
-        # During development the AWS CLI --zip-file flag handles this automatically.
         ZipFile: |
           exports.handler = async () => ({
             statusCode: 200,
@@ -88,7 +89,7 @@ Resources:
         - Key: Project
           Value: order-processing
         - Key: Week
-          Value: "1"
+          Value: "2"
         - Key: Owner
           Value: lambda-order-intake
 
@@ -106,7 +107,7 @@ Outputs:
       Name: !Sub "${AWS::StackName}-OrderIntakeFunctionName"
 
   OrderIntakeRoleArn:
-    Description: ARN of the Lambda execution role (useful for auditing permissions)
+    Description: ARN of the Lambda execution role
     Value: !GetAtt OrderIntakeExecutionRole.Arn
     Export:
       Name: !Sub "${AWS::StackName}-OrderIntakeRoleArn"
