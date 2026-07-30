@@ -1,0 +1,225 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Data Security stack (Week 3) - KMS CMK for DynamoDB encryption,
+  Secrets Manager for Lambda credentials, and a reusable access policy
+  for the Consumer Lambda execution roles.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: order-processing
+
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+
+  DynamoDbTableName:
+    Type: String
+    Description: >
+      Name of the existing Orders table (created by the EventBridge/Order
+      Intake team). Used only in the KMS key policy resource condition;
+      this stack does NOT create or own the table.
+
+Resources:
+
+  # ---------------------------------------------------------------------
+  # KMS Customer-Managed Key - encrypts the DynamoDB table and, optionally,
+  # the Secrets Manager secrets below.
+  # ---------------------------------------------------------------------
+  DataEncryptionKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "${ProjectName}-${Environment} CMK for DynamoDB + Secrets Manager"
+      EnableKeyRotation: true
+      PendingWindowInDays: 7
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          # Account root always retains admin rights on the key itself
+          - Sid: EnableRootAccountFullAccess
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+
+          # Anyone in the account can call kms:Decrypt / GenerateDataKey
+          # ONLY through DynamoDB or Secrets Manager - not directly.
+          # This is how you scope a "shared" CMK safely without hardcoding
+          # every Lambda role ARN into the key policy.
+          - Sid: AllowDynamoDbServiceUse
+            Effect: Allow
+            Principal:
+              AWS: "*"
+            Action:
+              - "kms:Decrypt"
+              - "kms:GenerateDataKey"
+              - "kms:DescribeKey"
+            Resource: "*"
+            Condition:
+              StringEquals:
+                "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+                "kms:CallerAccount": !Ref AWS::AccountId
+
+          - Sid: AllowSecretsManagerServiceUse
+            Effect: Allow
+            Principal:
+              AWS: "*"
+            Action:
+              - "kms:Decrypt"
+              - "kms:GenerateDataKey"
+              - "kms:DescribeKey"
+            Resource: "*"
+            Condition:
+              StringEquals:
+                "kms:ViaService": !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+                "kms:CallerAccount": !Ref AWS::AccountId
+
+          # Key administrators (adjust the role name to whoever manages
+          # the project's infra / your own deployment role)
+          - Sid: AllowKeyAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+            Action:
+              - "kms:Create*"
+              - "kms:Describe*"
+              - "kms:Enable*"
+              - "kms:List*"
+              - "kms:Put*"
+              - "kms:Update*"
+              - "kms:Revoke*"
+              - "kms:Disable*"
+              - "kms:Get*"
+              - "kms:Delete*"
+              - "kms:TagResource"
+              - "kms:UntagResource"
+              - "kms:ScheduleKeyDeletion"
+              - "kms:CancelKeyDeletion"
+            Resource: "*"
+
+  DataEncryptionKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/${ProjectName}-${Environment}-data-key"
+      TargetKeyId: !Ref DataEncryptionKey
+
+  # ---------------------------------------------------------------------
+  # Secrets Manager - one secret per external dependency the consumer
+  # Lambdas need at runtime. Add more AWS::SecretsManager::Secret blocks
+  # as the Payment/Inventory/Notification owners tell you what they need.
+  # ---------------------------------------------------------------------
+  PaymentGatewaySecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ProjectName}/${Environment}/payment-gateway"
+      Description: "Simulated payment gateway API credentials for the Payment Processing Lambda"
+      KmsKeyId: !Ref DataEncryptionKey
+      GenerateSecretString:
+        SecretStringTemplate: '{"apiKeyId":"demo-payment-key"}'
+        GenerateStringKey: "apiSecret"
+        ExcludePunctuation: true
+        PasswordLength: 32
+
+  NotificationServiceSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub "${ProjectName}/${Environment}/notification-service"
+      Description: "Third-party notification service (e.g. SES/SNS/Twilio-style) credentials"
+      KmsKeyId: !Ref DataEncryptionKey
+      GenerateSecretString:
+        SecretStringTemplate: '{"apiKeyId":"demo-notification-key"}'
+        GenerateStringKey: "apiSecret"
+        ExcludePunctuation: true
+        PasswordLength: 32
+
+  # Resource policy: belt-and-suspenders on top of IAM. Even if a role's
+  # IAM policy is too broad, this denies any principal outside the account.
+  PaymentGatewaySecretPolicy:
+    Type: AWS::SecretsManager::ResourcePolicy
+    Properties:
+      SecretId: !Ref PaymentGatewaySecret
+      ResourcePolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyOutsideAccount
+            Effect: Deny
+            Principal: "*"
+            Action: "secretsmanager:GetSecretValue"
+            Resource: "*"
+            Condition:
+              StringNotEquals:
+                "aws:PrincipalAccount": !Ref AWS::AccountId
+
+  NotificationServiceSecretPolicy:
+    Type: AWS::SecretsManager::ResourcePolicy
+    Properties:
+      SecretId: !Ref NotificationServiceSecret
+      ResourcePolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyOutsideAccount
+            Effect: Deny
+            Principal: "*"
+            Action: "secretsmanager:GetSecretValue"
+            Resource: "*"
+            Condition:
+              StringNotEquals:
+                "aws:PrincipalAccount": !Ref AWS::AccountId
+
+  # ---------------------------------------------------------------------
+  # Reusable, least-privilege managed policy the Consumer Lambdas owner
+  # attaches to their execution roles. This is the hand-off artifact for
+  # cross-team coordination - you own the policy, they own the role.
+  # ---------------------------------------------------------------------
+  ConsumerLambdaSecretsAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub "${ProjectName}-${Environment}-consumer-secrets-access"
+      Description: "Attach to Payment/Inventory/Notification Lambda execution roles to allow reading their specific secrets and using the shared CMK"
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ReadPaymentGatewaySecret
+            Effect: Allow
+            Action: "secretsmanager:GetSecretValue"
+            Resource: !Ref PaymentGatewaySecret
+          - Sid: ReadNotificationServiceSecret
+            Effect: Allow
+            Action: "secretsmanager:GetSecretValue"
+            Resource: !Ref NotificationServiceSecret
+          - Sid: UseSharedCmkForDecrypt
+            Effect: Allow
+            Action:
+              - "kms:Decrypt"
+              - "kms:DescribeKey"
+            Resource: !GetAtt DataEncryptionKey.Arn
+
+Outputs:
+  DataEncryptionKeyArn:
+    Description: ARN of the CMK - import this to set SSESpecification.KMSMasterKeyId on the Orders DynamoDB table
+    Value: !GetAtt DataEncryptionKey.Arn
+    Export:
+      Name: !Sub "${ProjectName}-${Environment}-data-key-arn"
+
+  DataEncryptionKeyAliasName:
+    Value: !Ref DataEncryptionKeyAlias
+    Export:
+      Name: !Sub "${ProjectName}-${Environment}-data-key-alias"
+
+  PaymentGatewaySecretArn:
+    Value: !Ref PaymentGatewaySecret
+    Export:
+      Name: !Sub "${ProjectName}-${Environment}-payment-secret-arn"
+
+  NotificationServiceSecretArn:
+    Value: !Ref NotificationServiceSecret
+    Export:
+      Name: !Sub "${ProjectName}-${Environment}-notification-secret-arn"
+
+  ConsumerLambdaSecretsAccessPolicyArn:
+    Description: Give this ARN to whoever owns the Consumer Lambdas role - they attach it to their execution roles
+    Value: !Ref ConsumerLambdaSecretsAccessPolicy
+    Export:
+      Name: !Sub "${ProjectName}-${Environment}-consumer-secrets-policy-arn"
