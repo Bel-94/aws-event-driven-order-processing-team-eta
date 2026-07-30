@@ -1,8 +1,10 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  Week 2 — EventBridge custom bus and OrderPlaced routing rules.
-  Fans the same OrderPlaced event out to Payment, Inventory, and Notification
-  Lambdas. Deploy consumers.yaml first, then pass their function ARNs here.
+  EventBridge custom bus and OrderPlaced routing rules.
+  Fans the same OrderPlaced event out to Payment, Inventory, and the
+  Notification SQS queue. Payment and Inventory are called directly.
+  Notification goes through SQS so failed events are buffered and retried
+  rather than dropped.
 
 Parameters:
   Environment:
@@ -22,14 +24,18 @@ Parameters:
     Type: String
     Description: ARN of the Inventory consumer Lambda.
 
-  NotificationFunctionArn:
+  SQSStackName:
     Type: String
-    Description: ARN of the Notification consumer Lambda.
+    Default: order-processing-sqs
+    Description: >
+      Name of the SQS stack. The Notification queue ARN is imported from here
+      and used as the EventBridge target in place of the Notification Lambda.
 
 Resources:
-  # -------------------------------------------------------------------------
-  # Custom event bus (not the default bus — keeps project events isolated)
-  # -------------------------------------------------------------------------
+
+  # ---------------------------------------------------------------------------
+  # Custom event bus — keeps project events off the default bus
+  # ---------------------------------------------------------------------------
   OrderProcessingEventBus:
     Type: AWS::Events::EventBus
     Properties:
@@ -40,14 +46,17 @@ Resources:
         - Key: Week
           Value: "2"
 
-  # -------------------------------------------------------------------------
-  # Shared event pattern for OrderPlaced
-  # -------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # OrderPlaced rule
+  # Payment and Inventory are targeted directly.
+  # Notification is targeted via SQS — EventBridge puts the event on the queue
+  # and the Notification Lambda picks it up from there.
+  # ---------------------------------------------------------------------------
   OrderPlacedRule:
     Type: AWS::Events::Rule
     Properties:
       Name: !Sub "${ProjectName}-order-placed-${Environment}"
-      Description: Route OrderPlaced events to all Week 2 consumers
+      Description: Route OrderPlaced events to Payment, Inventory, and Notification queue
       EventBusName: !Ref OrderProcessingEventBus
       State: ENABLED
       EventPattern:
@@ -58,14 +67,19 @@ Resources:
       Targets:
         - Id: PaymentProcessor
           Arn: !Ref PaymentFunctionArn
+
         - Id: InventoryUpdate
           Arn: !Ref InventoryFunctionArn
-        - Id: NotificationService
-          Arn: !Ref NotificationFunctionArn
 
-  # -------------------------------------------------------------------------
-  # Allow EventBridge to invoke each consumer (resource-based policy)
-  # -------------------------------------------------------------------------
+        # SQS target — EventBridge delivers the event as a message body.
+        # The Notification Lambda reads and parses this message from the queue.
+        - Id: NotificationQueue
+          Arn:
+            Fn::ImportValue: !Sub "${SQSStackName}-NotificationQueueArn"
+
+  # ---------------------------------------------------------------------------
+  # Invoke permissions for the Lambda targets
+  # ---------------------------------------------------------------------------
   PaymentInvokePermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -82,13 +96,9 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt OrderPlacedRule.Arn
 
-  NotificationInvokePermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      Action: lambda:InvokeFunction
-      FunctionName: !Ref NotificationFunctionArn
-      Principal: events.amazonaws.com
-      SourceArn: !GetAtt OrderPlacedRule.Arn
+  # No Lambda permission needed for the SQS target.
+  # The queue policy in sqs-dlq.yaml already allows events.amazonaws.com
+  # to call sqs:SendMessage on the queue.
 
 Outputs:
   EventBusName:
