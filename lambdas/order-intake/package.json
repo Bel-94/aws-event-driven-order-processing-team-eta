@@ -1,0 +1,12 @@
+{
+  "name": "order-intake",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Order Intake Lambda — DynamoDB write + OrderPlaced publish",
+  "main": "index.js",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.758.0",
+    "@aws-sdk/client-eventbridge": "^3.758.0",
+    "@aws-sdk/lib-dynamodb": "^3.758.0"
+  }
+}

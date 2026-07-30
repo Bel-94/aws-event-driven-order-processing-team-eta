@@ -1,0 +1,161 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Week 2 — Consumer Lambdas (Payment, Inventory, Notification).
+  Each reacts independently to OrderPlaced and updates its own status
+  attribute on the Orders table. Wire them to EventBridge via eventbridge.yaml.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+
+  DynamoDBStackName:
+    Type: String
+    Default: order-processing-db
+
+Resources:
+  # ===========================================================================
+  # Shared: least-privilege execution pieces differ only by function name tag
+  # ===========================================================================
+
+  ConsumerExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "order-consumers-execution-role-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ConsumersDynamoDBUpdate
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource:
+                  - Fn::ImportValue: !Sub "${DynamoDBStackName}-OrdersTableArn"
+
+  # ---------------------------------------------------------------------------
+  # Payment
+  # ---------------------------------------------------------------------------
+  PaymentProcessorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "payment-processor-${Environment}"
+      Description: Simulated payment — sets paymentStatus=PROCESSED on OrderPlaced
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt ConsumerExecutionRole.Arn
+      Timeout: 10
+      MemorySize: 128
+      Environment:
+        Variables:
+          ORDERS_TABLE_NAME:
+            Fn::ImportValue: !Sub "${DynamoDBStackName}-OrdersTableName"
+          CONSUMER_NAME: payment
+      Code:
+        ZipFile: |
+          exports.handler = async () => ({ ok: true, message: "placeholder — deploy real code via CLI" });
+      Tags:
+        - Key: Project
+          Value: order-processing
+        - Key: Week
+          Value: "2"
+        - Key: Owner
+          Value: consumer-payment
+
+  # ---------------------------------------------------------------------------
+  # Inventory
+  # ---------------------------------------------------------------------------
+  InventoryUpdateFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "inventory-update-${Environment}"
+      Description: Simulated inventory reserve — sets inventoryStatus=RESERVED
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt ConsumerExecutionRole.Arn
+      Timeout: 10
+      MemorySize: 128
+      Environment:
+        Variables:
+          ORDERS_TABLE_NAME:
+            Fn::ImportValue: !Sub "${DynamoDBStackName}-OrdersTableName"
+          CONSUMER_NAME: inventory
+      Code:
+        ZipFile: |
+          exports.handler = async () => ({ ok: true, message: "placeholder — deploy real code via CLI" });
+      Tags:
+        - Key: Project
+          Value: order-processing
+        - Key: Week
+          Value: "2"
+        - Key: Owner
+          Value: consumer-inventory
+
+  # ---------------------------------------------------------------------------
+  # Notification (Week 3 will put SQS in front of this function)
+  # ---------------------------------------------------------------------------
+  NotificationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "notification-${Environment}"
+      Description: Simulated notification — sets notificationStatus=SENT
+      Runtime: nodejs20.x
+      Handler: index.handler
+      Role: !GetAtt ConsumerExecutionRole.Arn
+      Timeout: 10
+      MemorySize: 128
+      Environment:
+        Variables:
+          ORDERS_TABLE_NAME:
+            Fn::ImportValue: !Sub "${DynamoDBStackName}-OrdersTableName"
+          CONSUMER_NAME: notification
+      Code:
+        ZipFile: |
+          exports.handler = async () => ({ ok: true, message: "placeholder — deploy real code via CLI" });
+      Tags:
+        - Key: Project
+          Value: order-processing
+        - Key: Week
+          Value: "2"
+        - Key: Owner
+          Value: consumer-notification
+
+Outputs:
+  PaymentFunctionArn:
+    Value: !GetAtt PaymentProcessorFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-PaymentFunctionArn"
+
+  InventoryFunctionArn:
+    Value: !GetAtt InventoryUpdateFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-InventoryFunctionArn"
+
+  NotificationFunctionArn:
+    Value: !GetAtt NotificationFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationFunctionArn"
+
+  PaymentFunctionName:
+    Value: !Ref PaymentProcessorFunction
+
+  InventoryFunctionName:
+    Value: !Ref InventoryUpdateFunction
+
+  NotificationFunctionName:
+    Value: !Ref NotificationFunction
+
+  ConsumerRoleArn:
+    Value: !GetAtt ConsumerExecutionRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ConsumerRoleArn"

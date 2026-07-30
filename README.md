@@ -85,9 +85,21 @@ The second week introduces EventBridge and transforms the system from a simple r
 
 **What is built**
 
-EventBridge is introduced as the event bus. The Order Intake Lambda now publishes an `OrderPlaced` event after writing to DynamoDB instead of handling everything itself. Three independent consumer Lambdas are added **(Payment Processing, Inventory Management, and Notification Service)** each reacting to the same event and updating order status in DynamoDB on their own.
+EventBridge is introduced as the event bus. The Order Intake Lambda now publishes an `OrderPlaced` event after writing to DynamoDB instead of handling everything itself. Three independent consumer Lambdas are added **(Payment Processing, Inventory Management, and Notification Service)** each reacting to the same event and updating their own status attributes on the order in DynamoDB.
 
-Security is also introduced this week. Cognito handles user authentication on the API. KMS encrypts data stored in DynamoDB. Secrets Manager holds any credentials the Lambdas need. API Gateway is configured with HTTPS enforcement, request validation, and rate limiting. CloudTrail and CloudWatch are enabled for auditing and monitoring.
+**In this repo (code)**
+
+- Schema: [`docs/event-schema.md`](docs/event-schema.md)
+- Bus + rules: `infrastructure/eventbridge.yaml`
+- Consumers: `infrastructure/consumers.yaml` + `lambdas/payment-processor|inventory-update|notification/`
+- Deploy guide: [`docs/eventbridge-deployment.md`](docs/eventbridge-deployment.md)
+
+**Still owned separately (not in the EventBridge PR)**
+
+- Cognito + API authorizer / request validation / throttling
+- Customer-managed KMS + Secrets Manager wiring
+
+Security monitoring pieces (CloudTrail / CloudWatch) landed under Week 3 observability.
 
 ---
 
