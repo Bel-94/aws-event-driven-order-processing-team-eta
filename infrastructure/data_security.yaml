@@ -60,7 +60,6 @@ Resources:
             Condition:
               StringEquals:
                 "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
-              StringEquals:
                 "kms:CallerAccount": !Ref AWS::AccountId
 
           - Sid: AllowSecretsManagerServiceUse
