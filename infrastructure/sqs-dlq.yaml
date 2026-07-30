@@ -1,0 +1,129 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Week 3 — SQS queue and Dead Letter Queue for the Notification service.
+  EventBridge routes OrderPlaced events into the main queue. The Notification
+  Lambda reads from the queue. Any message that fails processing after the
+  configured number of retries moves automatically to the DLQ so it can be
+  investigated without blocking new notifications.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+
+  ProjectName:
+    Type: String
+    Default: order-processing
+
+  # How many times SQS will attempt delivery before sending to the DLQ.
+  # 3 means the Lambda gets 3 total attempts, then the message moves to the DLQ.
+  MaxReceiveCount:
+    Type: Number
+    Default: 3
+    MinValue: 1
+    MaxValue: 10
+
+  # How long a message stays invisible to other consumers while being processed.
+  # 60 seconds gives the Lambda enough time to complete before SQS retries.
+  VisibilityTimeoutSeconds:
+    Type: Number
+    Default: 60
+
+  # How long messages stay in the main queue before expiring.
+  # 4 days (345600 seconds) is a reasonable window for operational recovery.
+  MessageRetentionPeriodSeconds:
+    Type: Number
+    Default: 345600
+
+  # How long failed messages stay in the DLQ — longer so the team has time to review.
+  DLQRetentionPeriodSeconds:
+    Type: Number
+    Default: 1209600
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # Dead Letter Queue
+  # Receives messages that have failed MaxReceiveCount deliveries on the main queue.
+  # Nothing consumes from here automatically — it exists so messages are not lost
+  # and so the team can inspect what failed and why.
+  # ---------------------------------------------------------------------------
+  NotificationDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ProjectName}-notification-dlq-${Environment}"
+      MessageRetentionPeriod: !Ref DLQRetentionPeriodSeconds
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: dead-letter-queue
+        - Key: Week
+          Value: "3"
+
+  # ---------------------------------------------------------------------------
+  # Main notification queue
+  # EventBridge sends OrderPlaced events here. The Notification Lambda polls
+  # this queue and processes one batch at a time.
+  # ---------------------------------------------------------------------------
+  NotificationQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub "${ProjectName}-notification-${Environment}"
+      VisibilityTimeout: !Ref VisibilityTimeoutSeconds
+      MessageRetentionPeriod: !Ref MessageRetentionPeriodSeconds
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt NotificationDLQ.Arn
+        maxReceiveCount: !Ref MaxReceiveCount
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Purpose
+          Value: notification-buffer
+        - Key: Week
+          Value: "3"
+
+  # ---------------------------------------------------------------------------
+  # Queue policy — allows EventBridge to send messages to the queue.
+  # Without this, EventBridge's call to sqs:SendMessage would be denied.
+  # ---------------------------------------------------------------------------
+  NotificationQueuePolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues:
+        - !Ref NotificationQueue
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowEventBridgeSend
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sqs:SendMessage
+            Resource: !GetAtt NotificationQueue.Arn
+
+Outputs:
+  NotificationQueueUrl:
+    Description: URL of the main notification SQS queue
+    Value: !Ref NotificationQueue
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationQueueUrl"
+
+  NotificationQueueArn:
+    Description: ARN of the main notification SQS queue — used as EventBridge target
+    Value: !GetAtt NotificationQueue.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationQueueArn"
+
+  NotificationDLQUrl:
+    Description: URL of the Dead Letter Queue — check here when notifications fail
+    Value: !Ref NotificationDLQ
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationDLQUrl"
+
+  NotificationDLQArn:
+    Description: ARN of the Dead Letter Queue
+    Value: !GetAtt NotificationDLQ.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationDLQArn"
