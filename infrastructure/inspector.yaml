@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Week 3 — Amazon Inspector v2 for continuous vulnerability scanning of
+  Lambda functions. Inspector scans function code packages for known CVEs
+  in third-party dependencies and flags insecure configurations.
+  Findings are visible in the Inspector console and flow into Security Hub
+  if that is enabled on the account.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+
+  ProjectName:
+    Type: String
+    Default: order-processing
+
+  # SNS topic to receive Inspector finding notifications.
+  # If left empty, findings are still visible in the console but no alerts fire.
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: >
+      Email address to receive Inspector finding alerts.
+      Leave empty to skip SNS setup and review findings manually in the console.
+
+Conditions:
+  CreateSNSAlerts: !Not [!Equals [!Ref AlertEmail, ""]]
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # Inspector v2 enablement
+  # This enables Lambda scanning for the current AWS account and region.
+  # Inspector scans are triggered automatically when a new Lambda function
+  # version is published or a layer is updated — no manual scan initiation needed.
+  # ---------------------------------------------------------------------------
+  InspectorEnablement:
+    Type: AWS::InspectorV2::EnableInspector
+    Properties:
+      ResourceTypes:
+        - LAMBDA
+
+  # ---------------------------------------------------------------------------
+  # SNS topic for finding alerts (only created if AlertEmail is provided)
+  # ---------------------------------------------------------------------------
+  InspectorFindingsTopic:
+    Type: AWS::SNS::Topic
+    Condition: CreateSNSAlerts
+    Properties:
+      TopicName: !Sub "${ProjectName}-inspector-findings-${Environment}"
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Week
+          Value: "3"
+
+  # ---------------------------------------------------------------------------
+  # EventBridge rule — catches Inspector findings of HIGH or CRITICAL severity
+  # and forwards them to the SNS topic.
+  # Inspector publishes finding events to the default event bus automatically.
+  # ---------------------------------------------------------------------------
+  InspectorFindingsRule:
+    Type: AWS::Events::Rule
+    Condition: CreateSNSAlerts
+    Properties:
+      Name: !Sub "${ProjectName}-inspector-high-critical-${Environment}"
+      Description: >
+        Forwards HIGH and CRITICAL Inspector findings to the alerts SNS topic.
+        Findings at lower severity are still visible in the console.
+      EventBusName: default
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.inspector2
+        detail-type:
+          - Inspector2 Finding
+        detail:
+          severity:
+            - HIGH
+            - CRITICAL
+          resources:
+            type:
+              - AWS_LAMBDA_FUNCTION
+      Targets:
+        - Id: InspectorFindingsSNS
+          Arn: !Ref InspectorFindingsTopic
+
+  # Allow EventBridge to publish to the SNS topic
+  InspectorSNSPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Condition: CreateSNSAlerts
+    Properties:
+      Topics:
+        - !Ref InspectorFindingsTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowEventBridgePublish
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref InspectorFindingsTopic
+
+Outputs:
+  InspectorStatus:
+    Description: Reminder that Inspector v2 Lambda scanning is now active
+    Value: !Sub "Inspector v2 Lambda scanning enabled in ${AWS::Region} for ${Environment}"
+
+  InspectorFindingsTopicArn:
+    Condition: CreateSNSAlerts
+    Description: SNS topic receiving HIGH and CRITICAL Inspector findings
+    Value: !Ref InspectorFindingsTopic
+    Export:
+      Name: !Sub "${AWS::StackName}-InspectorFindingsTopicArn"
