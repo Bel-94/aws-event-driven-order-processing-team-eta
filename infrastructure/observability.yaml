@@ -1,0 +1,400 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Week 3 — Observability stack for Event-Driven Order Processing.
+  Sets up CloudTrail (account-wide auditing), explicit CloudWatch Log Groups
+  for the Lambda + API Gateway, metric alarms for errors/throttles/5xx, and
+  an SNS topic + dashboard so the team can debug live during the demo.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+
+  ProjectName:
+    Type: String
+    Default: order-processing
+
+  OrderIntakeFunctionName:
+    Type: String
+    Default: order-intake-dev
+    Description: >
+      Name of the Order Intake Lambda (from lambda-order-intake.yaml stack output
+      OrderIntakeFunctionName). Defaults to order-intake-dev for Week 1 naming.
+
+  ApiGatewayName:
+    Type: String
+    Default: order-processing-orders-api
+    Description: >
+      Name of the REST API (must match OrdersRestApi Name in api-gateway.yaml).
+
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: >
+      Email address to subscribe to demo alerts. Leave blank to skip
+      auto-subscription and add subscribers manually later.
+
+Conditions:
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, ""]]
+
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # 1. CloudTrail — records every API call made in this account (who did what,
+  #    when). Independent of your app's own logs; this is account-level audit.
+  # ---------------------------------------------------------------------------
+
+  CloudTrailBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ProjectName}-cloudtrail-logs-${AWS::AccountId}"
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  CloudTrailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CloudTrailBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AWSCloudTrailAclCheck
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:GetBucketAcl
+            Resource: !GetAtt CloudTrailBucket.Arn
+          - Sid: AWSCloudTrailWrite
+            Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: s3:PutObject
+            Resource: !Sub "${CloudTrailBucket.Arn}/AWSLogs/${AWS::AccountId}/*"
+            Condition:
+              StringEquals:
+                s3:x-amz-acl: bucket-owner-full-control
+
+  # CloudTrail also streams into CloudWatch Logs so events show up near
+  # real-time (S3 delivery alone can lag ~15 min) — useful if you need to
+  # check "who changed what" during the demo itself.
+  CloudTrailLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/cloudtrail/${ProjectName}"
+      RetentionInDays: 30
+
+  CloudTrailToCloudWatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-cloudtrail-to-cwlogs-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudtrail.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudTrailToCWLogsWrite
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                # CloudTrail requires the log-stream wildcard suffix.
+                Resource: !Sub "${CloudTrailLogGroup.Arn}:*"
+
+  ProjectTrail:
+    Type: AWS::CloudTrail::Trail
+    DependsOn: CloudTrailBucketPolicy
+    Properties:
+      TrailName: !Sub "${ProjectName}-audit-trail"
+      S3BucketName: !Ref CloudTrailBucket
+      IsLogging: true
+      IsMultiRegionTrail: true
+      EnableLogFileValidation: true
+      IncludeGlobalServiceEvents: true
+      # Trail property also requires the :* suffix on the log group ARN.
+      CloudWatchLogsLogGroupArn: !Sub "${CloudTrailLogGroup.Arn}:*"
+      CloudWatchLogsRoleArn: !GetAtt CloudTrailToCloudWatchRole.Arn
+      EventSelectors:
+        - ReadWriteType: All
+          IncludeManagementEvents: true
+
+  # ---------------------------------------------------------------------------
+  # 2. Explicit CloudWatch Log Groups for the app itself
+  #    (Lambda auto-creates one with NO retention limit if you don't define
+  #    it yourself — this sets a 14-day retention instead of "forever".)
+  # ---------------------------------------------------------------------------
+
+  OrderIntakeLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${OrderIntakeFunctionName}"
+      RetentionInDays: 14
+
+  ApiGatewayAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/apigateway/${ApiGatewayName}-access-logs"
+      RetentionInDays: 14
+
+  # API Gateway needs account-level permission to push logs to CloudWatch.
+  # This is a one-time setting per AWS account/region, separate from any
+  # single Lambda's execution role.
+  ApiGatewayCloudWatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-apigw-cwlogs-role-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+
+  ApiGatewayAccountConfig:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn: !GetAtt ApiGatewayCloudWatchRole.Arn
+
+  # ---------------------------------------------------------------------------
+  # 3. SNS topic — where alarms notify. Subscribe the team's email so a
+  #    failure during the demo shows up as a notification, not something
+  #    someone has to notice by staring at a console.
+  # ---------------------------------------------------------------------------
+
+  DemoAlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${ProjectName}-demo-alerts-${Environment}"
+
+  DemoAlertsEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref DemoAlertsTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  # ---------------------------------------------------------------------------
+  # 4. Alarms — Lambda
+  # ---------------------------------------------------------------------------
+
+  OrderIntakeErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-order-intake-errors-${Environment}"
+      AlarmDescription: Fires if the Order Intake Lambda throws any error.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref OrderIntakeFunctionName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref DemoAlertsTopic
+
+  OrderIntakeThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-order-intake-throttles-${Environment}"
+      AlarmDescription: Fires if the Order Intake Lambda gets throttled (concurrency limit hit).
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref OrderIntakeFunctionName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref DemoAlertsTopic
+
+  OrderIntakeDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-order-intake-duration-${Environment}"
+      AlarmDescription: >
+        Fires if average duration exceeds 8s (function timeout is 10s) —
+        catches things getting slow before they start hard-failing.
+      Namespace: AWS/Lambda
+      MetricName: Duration
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref OrderIntakeFunctionName
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 8000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref DemoAlertsTopic
+
+  # ---------------------------------------------------------------------------
+  # 5. Alarms — API Gateway
+  # ---------------------------------------------------------------------------
+
+  Api5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-api-5xx-${Environment}"
+      AlarmDescription: Fires on any server-side (5xx) error from the API.
+      Namespace: AWS/ApiGateway
+      MetricName: 5XXError
+      Dimensions:
+        - Name: ApiName
+          Value: !Ref ApiGatewayName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref DemoAlertsTopic
+
+  Api4xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${ProjectName}-api-4xx-${Environment}"
+      AlarmDescription: >
+        Fires if client errors spike (5+ in a minute) — often means a
+        request format issue rather than a backend failure.
+      Namespace: AWS/ApiGateway
+      MetricName: 4XXError
+      Dimensions:
+        - Name: ApiName
+          Value: !Ref ApiGatewayName
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref DemoAlertsTopic
+
+  # ---------------------------------------------------------------------------
+  # 6. Metric filter — turns your existing console.error() logging into a
+  #    countable metric, so DynamoDB write failures are visible as a number,
+  #    not something you have to go find in raw log text.
+  # ---------------------------------------------------------------------------
+
+  DynamoWriteFailureMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    Properties:
+      LogGroupName: !Ref OrderIntakeLogGroup
+      FilterPattern: "\"DynamoDB write failed\""
+      MetricTransformations:
+        - MetricName: DynamoWriteFailures
+          MetricNamespace: !Sub "${ProjectName}/OrderIntake"
+          MetricValue: "1"
+          DefaultValue: 0
+
+  # ---------------------------------------------------------------------------
+  # 7. One dashboard combining everything — so during the demo, the whole
+  #    team looks at one screen instead of tabbing between console pages.
+  # ---------------------------------------------------------------------------
+
+  DemoDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${ProjectName}-demo-dashboard-${Environment}"
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "Order Intake — Errors / Throttles",
+                "metrics": [
+                  ["AWS/Lambda", "Errors", "FunctionName", "${OrderIntakeFunctionName}", {"stat": "Sum"}],
+                  ["AWS/Lambda", "Throttles", "FunctionName", "${OrderIntakeFunctionName}", {"stat": "Sum"}]
+                ],
+                "period": 60,
+                "region": "${AWS::Region}"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 0, "width": 12, "height": 6,
+              "properties": {
+                "title": "Order Intake — Duration (ms)",
+                "metrics": [
+                  ["AWS/Lambda", "Duration", "FunctionName", "${OrderIntakeFunctionName}", {"stat": "Average"}]
+                ],
+                "period": 60,
+                "region": "${AWS::Region}"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "API Gateway — 4xx / 5xx",
+                "metrics": [
+                  ["AWS/ApiGateway", "4XXError", "ApiName", "${ApiGatewayName}", {"stat": "Sum"}],
+                  ["AWS/ApiGateway", "5XXError", "ApiName", "${ApiGatewayName}", {"stat": "Sum"}]
+                ],
+                "period": 60,
+                "region": "${AWS::Region}"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12, "y": 6, "width": 12, "height": 6,
+              "properties": {
+                "title": "API Gateway — Latency (ms)",
+                "metrics": [
+                  ["AWS/ApiGateway", "Latency", "ApiName", "${ApiGatewayName}", {"stat": "Average"}]
+                ],
+                "period": 60,
+                "region": "${AWS::Region}"
+              }
+            }
+          ]
+        }
+
+Outputs:
+  TrailArn:
+    Description: ARN of the CloudTrail trail
+    Value: !GetAtt ProjectTrail.Arn
+
+  ApiGatewayAccessLogGroupArn:
+    Description: >
+      ARN of the API Gateway access log group. Imported by api-gateway.yaml's
+      OrdersApiStage AccessLogSetting — deploy this stack before updating
+      api-gateway.yaml, or the ImportValue there will fail.
+    Value: !GetAtt ApiGatewayAccessLogGroup.Arn
+    Export:
+      Name: !Sub "${ProjectName}-ApiGatewayAccessLogGroupArn"
+
+  DemoAlertsTopicArn:
+    Description: SNS topic ARN — subscribe more people to this as needed
+    Value: !Ref DemoAlertsTopic
+
+  DashboardUrl:
+    Description: Direct link to the demo dashboard
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${ProjectName}-demo-dashboard-${Environment}"

@@ -1,7 +1,9 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  Week 1  API Gateway entry point for Event-Driven Order Processing.
+  Week 1 API Gateway entry point for Event-Driven Order Processing.
   Exposes POST /orders and proxies requests to the Order Intake Lambda.
+  Week 3 (optional): set EnableAccessLogging=true after deploying
+  infrastructure/observability.yaml to turn on access + method logging.
 
 Parameters:
   ProjectName:
@@ -31,9 +33,19 @@ Parameters:
       Function name of Order Intake Lambda if you do not have the ARN yet.
       Example: order-intake
 
+  EnableAccessLogging:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >
+      Set to true only after observability.yaml is deployed (exports the
+      access log group ARN). Leave false for Week 1 so API Gateway can
+      deploy independently.
+
 Conditions:
   HasFunctionArn: !Not [!Equals [!Ref OrderIntakeFunctionArn, ""]]
   HasFunctionName: !Not [!Equals [!Ref OrderIntakeFunctionName, ""]]
+  AccessLoggingEnabled: !Equals [!Ref EnableAccessLogging, "true"]
 
 Resources:
   # ---------------------------------------------------------------------------
@@ -87,19 +99,14 @@ Resources:
               - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${OrderIntakeFunctionName}"
 
   # ---------------------------------------------------------------------------
-  # 5. Deployment + stage 
+  # 5. Deployment + stage
   #
   # Deployment is a snapshot of the API config. Stage is the named URL segment
   # (e.g. /dev). Without these, the API exists but is not callable.
+  #
+  # Week 3 (optional): AccessLogSetting + MethodSettings when
+  # EnableAccessLogging=true. Requires observability.yaml export first.
   # ---------------------------------------------------------------------------
-  OrdersApiDeployment:
-    Type: AWS::ApiGateway::Deployment
-    DependsOn:
-      - OrdersPostMethod
-    Properties:
-      RestApiId: !Ref OrdersRestApi
-      Description: !Sub "Deploy ${ProjectName} orders API"
-
   OrdersApiStage:
     Type: AWS::ApiGateway::Stage
     Properties:
@@ -107,11 +114,37 @@ Resources:
       RestApiId: !Ref OrdersRestApi
       DeploymentId: !Ref OrdersApiDeployment
       Description: !Sub "${ProjectName} ${StageName} stage"
+
+      AccessLogSetting: !If
+        - AccessLoggingEnabled
+        - DestinationArn:
+            Fn::ImportValue: !Sub "${ProjectName}-ApiGatewayAccessLogGroupArn"
+          Format: >
+            {
+              "requestId":"$context.requestId",
+              "ip":"$context.identity.sourceIp",
+              "httpMethod":"$context.httpMethod",
+              "resourcePath":"$context.resourcePath",
+              "status":"$context.status",
+              "responseTime":"$context.responseLatency"
+            }
+        - !Ref AWS::NoValue
+
+      MethodSettings: !If
+        - AccessLoggingEnabled
+        - - ResourcePath: "/*"
+            HttpMethod: "*"
+            LoggingLevel: INFO
+            MetricsEnabled: true
+            # Logs full request/response bodies — fine for demo; disable after.
+            DataTraceEnabled: true
+        - !Ref AWS::NoValue
+
       Tags:
         - Key: Project
           Value: !Ref ProjectName
         - Key: Week
-          Value: "1"
+          Value: !If [AccessLoggingEnabled, "3", "1"]
 
   # ---------------------------------------------------------------------------
   # 6. Permission: allow THIS API to invoke Order Intake Lambda
@@ -131,6 +164,19 @@ Resources:
       SourceArn: !Sub
         - "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiId}/*/POST/orders"
         - ApiId: !Ref OrdersRestApi
+
+  # ---------------------------------------------------------------------------
+  # Deployment
+  # (moved above OrdersApiStage in read order only for grouping;
+  #  DependsOn still enforces correct creation order)
+  # ---------------------------------------------------------------------------
+  OrdersApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - OrdersPostMethod
+    Properties:
+      RestApiId: !Ref OrdersRestApi
+      Description: !Sub "Deploy ${ProjectName} orders API"
 
 Outputs:
   ApiId:

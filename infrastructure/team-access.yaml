@@ -1,0 +1,42 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Read-only observability access for the team.
+  Creates one IAM group with view-only permissions for CloudTrail and
+  CloudWatch (logs, metrics, alarms, dashboards) and attaches existing
+  IAM users to it. Nobody in this group can change or delete anything —
+  they can only look.
+
+Parameters:
+  TeamUsernames:
+    Type: CommaDelimitedList
+    Description: >
+      Comma-separated list of EXISTING IAM usernames to grant read-only
+      observability access to, e.g. "alice,bob,carol". These IAM users
+      must already exist in this account — this template does not create
+      new logins, only grants an existing user access to view this data.
+
+Resources:
+
+  ObservabilityReadOnlyGroup:
+    Type: AWS::IAM::Group
+    Properties:
+      GroupName: observability-read-only
+      ManagedPolicyArns:
+        # View trail config + look up event history (who did what, when)
+        - arn:aws:iam::aws:policy/AWSCloudTrailReadOnlyAccess
+        # View log groups/streams, metrics, alarms, and dashboards
+        - arn:aws:iam::aws:policy/CloudWatchReadOnlyAccess
+
+  TeamGroupMembership:
+    Type: AWS::IAM::UserToGroupAddition
+    Properties:
+      GroupName: !Ref ObservabilityReadOnlyGroup
+      Users: !Ref TeamUsernames
+
+Outputs:
+  GroupName:
+    Description: >
+      IAM group teammates were added to. To add someone new later,
+      either redeploy this stack with an updated TeamUsernames parameter,
+      or add them to this group directly in the IAM console.
+    Value: !Ref ObservabilityReadOnlyGroup
