@@ -134,9 +134,17 @@ Brand-first grocery experience with a clear path into shopping and into the arch
 
 ![FreshBasket landing page](images/landing-page.png)
 
-### Sign-in / welcome
+### Sign-in / create account
 
-Authenticated sessions use **Amazon Cognito**. After a successful sign-in, the UI greets the shopper by name.
+Shoppers authenticate with **Amazon Cognito**. Sign-up emails a one-time code before the account is confirmed; returning shoppers use the sign-in form (with forgot-password).
+
+![FreshBasket sign-in page](images/sign-in-page.png)
+
+![FreshBasket create account page](images/sign-up-page.png)
+
+### Welcome after sign-in
+
+After a successful sign-in, the UI greets the shopper by name.
 
 ![Welcome message after Cognito sign-in](images/user-welcome-message.png)
 
