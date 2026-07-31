@@ -1,33 +1,34 @@
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 const { DynamoDBDocumentClient, UpdateCommand } = require("@aws-sdk/lib-dynamodb");
+const { SecretsManagerClient, GetSecretValueCommand } = require("@aws-sdk/client-secrets-manager");
 
 const TABLE_NAME = process.env.ORDERS_TABLE_NAME;
+const NOTIFICATION_SECRET_ARN = process.env.NOTIFICATION_SECRET_ARN;
 const docClient = DynamoDBDocumentClient.from(new DynamoDBClient({}));
+const secretsClient = new SecretsManagerClient({});
 
-// ---------------------------------------------------------------------------
-// How this function is triggered (Week 3 change)
-//
-// In Week 2, EventBridge called this function directly with an event object
-// whose shape was: { detail: { orderId, customerId, ... } }
-//
-// In Week 3, EventBridge sends the OrderPlaced event into an SQS queue first.
-// SQS then calls this function with a batch of records. Each record's body
-// is a JSON string of the original EventBridge event.
-//
-// The function loops through the batch, processes each message, and returns
-// a batchItemFailures list for anything that errors. SQS uses that list to
-// retry only the failed messages rather than the whole batch — messages not
-// in the failure list are deleted from the queue automatically.
-// ---------------------------------------------------------------------------
+async function loadNotificationCredentials() {
+  if (!NOTIFICATION_SECRET_ARN) {
+    console.log("NOTIFICATION_SECRET_ARN not set — skipping Secrets Manager lookup");
+    return null;
+  }
+
+  const result = await secretsClient.send(
+    new GetSecretValueCommand({ SecretId: NOTIFICATION_SECRET_ARN })
+  );
+  const secret = JSON.parse(result.SecretString || "{}");
+  console.log("Loaded notification service secret. keys:", Object.keys(secret).join(","));
+  return secret;
+}
 
 async function processOrder(detail) {
   const { orderId, customerId } = detail;
 
   if (!orderId) {
-    // Throwing here means this message goes back to SQS for retry,
-    // and eventually to the DLQ if it keeps failing.
     throw new Error("OrderPlaced event is missing orderId");
   }
+
+  await loadNotificationCredentials();
 
   console.log(`Processing notification for order ${orderId} customer ${customerId}`);
 
@@ -50,31 +51,17 @@ async function processOrder(detail) {
 exports.handler = async (event) => {
   console.log("SQS event received:", JSON.stringify(event, null, 2));
 
-  // SQS delivers a batch of records. We track any that fail so SQS can
-  // retry them individually rather than replaying the whole batch.
   const batchItemFailures = [];
 
   for (const record of event.Records) {
-    let messageId = record.messageId;
+    const messageId = record.messageId;
 
     try {
-      // The SQS message body is a JSON string of the EventBridge envelope.
-      // EventBridge wraps the original event when it targets an SQS queue,
-      // so the actual order data lives inside the "detail" key.
       const body = JSON.parse(record.body);
-
-      // EventBridge wraps events sent to SQS inside a "detail" field.
-      // If for some reason the body is already flat (e.g. a test message
-      // sent directly to SQS), we fall back to the body itself.
       const detail = body.detail || body;
-
       await processOrder(detail);
     } catch (err) {
       console.error(`Failed to process message ${messageId}:`, err.message);
-
-      // Returning the messageId here tells SQS this specific message failed.
-      // SQS will make it visible again for retry. After MaxReceiveCount
-      // retries it moves to the DLQ automatically.
       batchItemFailures.push({ itemIdentifier: messageId });
     }
   }

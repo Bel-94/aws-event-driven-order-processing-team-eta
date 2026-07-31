@@ -1,7 +1,8 @@
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   DynamoDB table for storing customer orders, with GSIs for
   customer order history and status-based processing queries.
+  Week 3: optional customer-managed KMS key from data_security.yaml.
 
 Parameters:
   Environment:
@@ -12,6 +13,23 @@ Parameters:
       - staging
       - prod
     Description: Deployment environment, used in the table name.
+
+  ProjectName:
+    Type: String
+    Default: order-processing
+    Description: Must match ProjectName used in data_security.yaml exports.
+
+  UseCustomerManagedKey:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >
+      When true, encrypts the table with the CMK exported by data_security
+      (${ProjectName}-${Environment}-data-key-arn). Deploy data_security first.
+      Set false only for a quick AWS-owned key bootstrap without that stack.
+
+Conditions:
+  UseCmk: !Equals [!Ref UseCustomerManagedKey, "true"]
 
 Resources:
   OrdersTable:
@@ -50,11 +68,16 @@ Resources:
             ProjectionType: ALL
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
-      SSESpecification:
-        SSEEnabled: true
+      SSESpecification: !If
+        - UseCmk
+        - SSEEnabled: true
+          SSEType: KMS
+          KMSMasterKeyId:
+            Fn::ImportValue: !Sub "${ProjectName}-${Environment}-data-key-arn"
+        - SSEEnabled: true
       Tags:
         - Key: Project
-          Value: orders-service
+          Value: !Ref ProjectName
         - Key: Environment
           Value: !Ref Environment
 

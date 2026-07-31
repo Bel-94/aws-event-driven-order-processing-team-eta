@@ -1,0 +1,126 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Week 3 - AWS WAF (WAFv2) in front of API Gateway.
+  Applies AWS managed rules for common exploits (SQLi, known bad inputs / XSS-class
+  attacks) and documents that Shield Standard is automatic on AWS-managed endpoints.
+  Associate this Web ACL with the REST API stage after api-gateway.yaml is deployed.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+
+  ProjectName:
+    Type: String
+    Default: order-processing
+
+  ApiStackProjectName:
+    Type: String
+    Default: order-processing
+    Description: >
+      ProjectName used when deploying api-gateway.yaml (exports ${ProjectName}-ApiId).
+
+  StageName:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: API Gateway stage to protect (must match api-gateway StageName).
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # Regional Web ACL for API Gateway
+  # ---------------------------------------------------------------------------
+  ApiWebACL:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: !Sub "${ProjectName}-api-waf-${Environment}"
+      Scope: REGIONAL
+      Description: >
+        Protects POST /orders against common web exploits. Shield Standard
+        (automatic DDoS baseline) applies to API Gateway without extra config.
+      DefaultAction:
+        Allow: {}
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub "${ProjectName}-api-waf-${Environment}"
+      Rules:
+        # AWS managed SQLi rule group
+        - Name: AWSManagedRulesSQLiRuleSet
+          Priority: 0
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesSQLiRuleSet
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesSQLiRuleSet
+
+        # Core rule set includes XSS and other common attack patterns
+        - Name: AWSManagedRulesCommonRuleSet
+          Priority: 1
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesCommonRuleSet
+
+        # Known bad inputs (includes additional XSS / LFI style signatures)
+        - Name: AWSManagedRulesKnownBadInputsRuleSet
+          Priority: 2
+          OverrideAction:
+            None: {}
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedRulesKnownBadInputsRuleSet
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Week
+          Value: "3"
+
+  # ---------------------------------------------------------------------------
+  # Associate Web ACL with the API Gateway stage
+  # ARN format for REST APIs:
+  # arn:aws:apigateway:region::/restapis/api-id/stages/stage-name
+  # ---------------------------------------------------------------------------
+  ApiWebACLAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Properties:
+      ResourceArn: !Sub
+        - "arn:aws:apigateway:${AWS::Region}::/restapis/${ApiId}/stages/${Stage}"
+        - ApiId:
+            Fn::ImportValue: !Sub "${ApiStackProjectName}-ApiId"
+          Stage: !Ref StageName
+      WebACLArn: !GetAtt ApiWebACL.Arn
+
+Outputs:
+  WebACLArn:
+    Description: WAFv2 Web ACL ARN protecting the orders API stage
+    Value: !GetAtt ApiWebACL.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-WebACLArn"
+
+  WebACLName:
+    Description: WAFv2 Web ACL name
+    Value: !Ref ApiWebACL
+
+  ShieldStandardNote:
+    Description: Reminder for the presentation
+    Value: >
+      AWS Shield Standard is automatically enabled for API Gateway and other
+      AWS-managed endpoints. No extra stack is required for baseline DDoS protection.
