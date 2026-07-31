@@ -76,13 +76,23 @@ Invoke-WebRequest -Uri $API_URL -Method POST -ContentType "application/json" `
 
 - Intake Lambda writes DynamoDB + publishes `OrderPlaced` to EventBridge  
 - EventBridge → SQS queues → Payment / Inventory / Notification Lambdas  
+- Notification Lambda sends confirmation via **Amazon SES** (async — checkout already returned 201)  
 - Cognito JWT on API Gateway; WAF on the stage; CMK/Secrets on sensitive paths  
 
-## 4. Optional failure demo (DLQ)
+## 4. SES email proof
+
+1. Confirm `ntinyaribelinda@gmail.com` is **Success** in SES (click the AWS verify link if still Pending).  
+2. `POST /orders` with `customerEmail` set to that address (or rely on `SES_DEFAULT_TO_EMAIL`).  
+3. Open the inbox → FreshBasket order confirmed.  
+4. DynamoDB: `notificationChannel=email`, `notificationTo`, `notificationMessageId`.  
+
+Guide: `docs/ses-email-notifications.md`
+
+## 5. Optional failure demo (DLQ)
 
 Temporarily make Notification throw (see `docs/sqs-dlq-inspector-deployment.md`), place another order, show message in Notification DLQ, then restore code.
 
-## 5. Security slide (console)
+## 6. Security slide (console)
 
 - Cognito user pool + authorizer on `POST /orders`  
 - WAF Web ACL associated to API stage  

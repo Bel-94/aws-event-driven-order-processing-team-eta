@@ -1,0 +1,94 @@
+<div class="fb-container py-16 fb-animate-in">
+  <div class="mx-auto max-w-md">
+    <div class="text-center">
+      <h1 class="font-display text-3xl font-semibold text-ink">
+        {{ awaitingCode() ? 'Verify your email' : 'Create account' }}
+      </h1>
+      <p class="mt-2 text-sm text-ink-soft">
+        @if (awaitingCode()) {
+          Enter the code Cognito emailed to
+          <span class="font-medium text-ink">{{ pendingEmail() }}</span>.
+        } @else {
+          Anyone can join during the demo — we’ll email a one-time code to confirm it’s you.
+        }
+      </p>
+    </div>
+
+    @if (!awaitingCode()) {
+      <form class="fb-card mt-8 space-y-5 p-6 sm:p-8" [formGroup]="form" (ngSubmit)="submit()">
+        <div>
+          <label class="fb-label" for="name">Full name</label>
+          <input id="name" type="text" class="fb-input" formControlName="name" autocomplete="name" />
+          @if (form.controls.name.touched && form.controls.name.invalid) {
+            <p class="mt-1 text-xs text-warn">Enter your name (at least 2 characters).</p>
+          }
+        </div>
+
+        <div>
+          <label class="fb-label" for="email">Email</label>
+          <input id="email" type="email" class="fb-input" formControlName="email" autocomplete="email" />
+          @if (form.controls.email.touched && form.controls.email.invalid) {
+            <p class="mt-1 text-xs text-warn">Enter a valid email address.</p>
+          }
+        </div>
+
+        <div>
+          <label class="fb-label" for="password">Password</label>
+          <input
+            id="password"
+            type="password"
+            class="fb-input"
+            formControlName="password"
+            autocomplete="new-password"
+          />
+          <p class="mt-1 text-xs text-ink-soft">At least 8 characters, with upper, lower, and a number.</p>
+        </div>
+
+        <button type="submit" class="fb-btn-primary w-full" [disabled]="submitting()">
+          {{ submitting() ? 'Sending code…' : 'Continue' }}
+        </button>
+      </form>
+    } @else {
+      <form class="fb-card mt-8 space-y-5 p-6 sm:p-8" [formGroup]="confirmForm" (ngSubmit)="confirm()">
+        <div>
+          <label class="fb-label" for="code">Verification code</label>
+          <input
+            id="code"
+            type="text"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            class="fb-input tracking-[0.2em]"
+            formControlName="code"
+            placeholder="123456"
+          />
+          @if (confirmForm.controls.code.touched && confirmForm.controls.code.invalid) {
+            <p class="mt-1 text-xs text-warn">Enter the code from your email.</p>
+          }
+        </div>
+
+        <button type="submit" class="fb-btn-primary w-full" [disabled]="submitting()">
+          {{ submitting() ? 'Verifying…' : 'Verify and sign in' }}
+        </button>
+
+        <div class="flex items-center justify-between gap-3 text-sm">
+          <button type="button" class="font-medium text-leaf-700 hover:text-leaf-800" (click)="backToForm()">
+            Use a different email
+          </button>
+          <button
+            type="button"
+            class="font-medium text-ink-soft hover:text-ink"
+            (click)="resend()"
+            [disabled]="resending()"
+          >
+            {{ resending() ? 'Sending…' : 'Resend code' }}
+          </button>
+        </div>
+      </form>
+    }
+
+    <p class="mt-6 text-center text-sm text-ink-soft">
+      Already shopping with us?
+      <a routerLink="/sign-in" class="font-semibold text-leaf-700 hover:text-leaf-800">Sign in</a>
+    </p>
+  </div>
+</div>

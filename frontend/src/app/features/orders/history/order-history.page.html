@@ -1,0 +1,45 @@
+<div class="fb-container py-10 fb-animate-in">
+  <h1 class="font-display text-3xl font-semibold text-ink">Your orders</h1>
+  <p class="mt-1 text-sm text-ink-soft">Past baskets and live status from the event-driven pipeline.</p>
+
+  @if (orders().length === 0) {
+    <div class="fb-card mt-8 p-10 text-center">
+      <p class="text-ink-soft">No orders yet.</p>
+      <a routerLink="/shop" class="fb-btn-primary mt-4 inline-flex">Start shopping</a>
+    </div>
+  } @else {
+    <ul class="mt-8 space-y-4">
+      @for (order of orders(); track order.orderId) {
+        <li>
+          <a
+            [routerLink]="['/orders', order.orderId, 'success']"
+            class="fb-card flex flex-col gap-4 p-5 transition hover:border-leaf-200 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div>
+              <p class="font-mono text-sm font-semibold text-ink">{{ order.orderId }}</p>
+              <p class="mt-1 text-sm text-ink-soft">{{ order.createdAt | date: 'medium' }}</p>
+              <p class="mt-1 text-sm text-ink-soft">{{ order.items.length }} items</p>
+            </div>
+            <div class="flex items-center gap-4">
+              <span
+                class="rounded-full px-2.5 py-0.5 text-xs font-semibold"
+                [class.bg-leaf-100]="order.status === 'Completed'"
+                [class.text-leaf-800]="order.status === 'Completed'"
+                [class.bg-amber-50]="order.status === 'Pending' || order.status === 'Processing'"
+                [class.text-amber-800]="order.status === 'Pending' || order.status === 'Processing'"
+                [class.bg-orange-100]="order.status === 'Cancelled'"
+                [class.text-warn]="order.status === 'Cancelled'"
+              >
+                {{ order.status }}
+              </span>
+              <span class="font-display text-lg font-semibold text-ink">{{
+                order.totalAmount | currency: order.currency
+              }}</span>
+              <span class="material-symbols-outlined text-ink-soft">chevron_right</span>
+            </div>
+          </a>
+        </li>
+      }
+    </ul>
+  }
+</div>

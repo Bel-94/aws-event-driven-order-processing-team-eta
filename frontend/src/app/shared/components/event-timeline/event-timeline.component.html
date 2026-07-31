@@ -1,0 +1,92 @@
+<section [class]="compact ? 'space-y-3' : 'space-y-0'" aria-label="Event-driven processing timeline">
+  <ol class="relative space-y-0">
+    @for (step of steps; track step.id; let last = $last) {
+      <li class="relative flex gap-4 pb-8 last:pb-0">
+        @if (!last) {
+          <span
+            class="absolute left-[15px] top-8 h-[calc(100%-12px)] w-px"
+            [class.bg-leaf-500]="step.status === 'completed'"
+            [class.bg-line]="step.status !== 'completed'"
+            aria-hidden="true"
+          ></span>
+        }
+
+        <div class="relative z-10 shrink-0">
+          @switch (step.status) {
+            @case ('completed') {
+              <span
+                class="grid h-8 w-8 place-items-center rounded-full bg-leaf-600 text-white shadow-sm"
+                aria-label="Completed"
+              >
+                <span class="material-symbols-outlined text-[18px] filled">check</span>
+              </span>
+            }
+            @case ('active') {
+              <span
+                class="grid h-8 w-8 place-items-center rounded-full border-2 border-leaf-500 bg-white text-leaf-700 fb-pulse"
+                aria-label="In progress"
+              >
+                <span class="h-2.5 w-2.5 rounded-full bg-leaf-600"></span>
+              </span>
+            }
+            @case ('failed') {
+              <span
+                class="grid h-8 w-8 place-items-center rounded-full bg-warn text-white"
+                aria-label="Failed"
+              >
+                <span class="material-symbols-outlined text-[18px]">close</span>
+              </span>
+            }
+            @default {
+              <span
+                class="grid h-8 w-8 place-items-center rounded-full border border-line bg-mist text-ink-soft"
+                aria-label="Pending"
+              >
+                <span class="h-2 w-2 rounded-full bg-ink-soft/40"></span>
+              </span>
+            }
+          }
+        </div>
+
+        <div
+          class="min-w-0 flex-1 rounded-2xl border px-4 py-3 transition"
+          [class.border-leaf-200]="step.status === 'active' || step.status === 'completed'"
+          [class.bg-leaf-50/60]="step.status === 'active'"
+          [class.bg-white]="step.status !== 'active'"
+          [class.border-line]="step.status === 'pending'"
+          [class.opacity-70]="step.status === 'pending'"
+        >
+          <div class="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <p class="font-semibold text-ink">{{ step.title }}</p>
+              @if (step.service) {
+                <p class="mt-0.5 text-xs font-medium text-leaf-700">{{ step.service }}</p>
+              }
+            </div>
+            <span
+              class="rounded-full px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide"
+              [class.bg-leaf-100]="step.status === 'completed'"
+              [class.text-leaf-800]="step.status === 'completed'"
+              [class.bg-amber-50]="step.status === 'active'"
+              [class.text-amber-800]="step.status === 'active'"
+              [class.bg-mist]="step.status === 'pending'"
+              [class.text-ink-soft]="step.status === 'pending'"
+              [class.bg-orange-100]="step.status === 'failed'"
+              [class.text-warn]="step.status === 'failed'"
+            >
+              {{ step.status }}
+            </span>
+          </div>
+          @if (!compact) {
+            <p class="mt-2 text-sm leading-relaxed text-ink-soft">{{ step.description }}</p>
+          }
+          @if (step.timestamp) {
+            <p class="mt-2 text-xs text-ink-soft/80">
+              {{ step.timestamp | date: 'mediumTime' }}
+            </p>
+          }
+        </div>
+      </li>
+    }
+  </ol>
+</section>

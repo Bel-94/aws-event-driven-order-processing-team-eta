@@ -1,0 +1,26 @@
+<div class="pointer-events-none fixed inset-x-0 top-20 z-[60] flex flex-col items-end gap-2 px-4 sm:px-6">
+  @for (item of toast.toasts(); track item.id) {
+    <div
+      class="pointer-events-auto fb-animate-in flex w-full max-w-sm items-start gap-3 rounded-2xl border border-line bg-white p-4 shadow-lg"
+      role="status"
+    >
+      <span
+        class="material-symbols-outlined mt-0.5"
+        [class.text-leaf-600]="item.type === 'success'"
+        [class.text-warn]="item.type === 'error'"
+        [class.text-ink-soft]="item.type === 'info'"
+      >
+        {{ item.type === 'success' ? 'check_circle' : item.type === 'error' ? 'error' : 'info' }}
+      </span>
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-semibold text-ink">{{ item.title }}</p>
+        @if (item.body) {
+          <p class="mt-0.5 text-sm text-ink-soft">{{ item.body }}</p>
+        }
+      </div>
+      <button type="button" class="text-ink-soft hover:text-ink" (click)="toast.dismiss(item.id)" aria-label="Dismiss">
+        <span class="material-symbols-outlined text-[18px]">close</span>
+      </button>
+    </div>
+  }
+</div>

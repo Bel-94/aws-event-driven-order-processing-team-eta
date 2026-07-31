@@ -1,0 +1,90 @@
+<div class="fb-container py-10 fb-animate-in">
+  @if (!order()) {
+    <div class="fb-card p-10 text-center">
+      <p class="font-medium text-ink">Order not found</p>
+      <p class="mt-2 text-sm text-ink-soft">It may have expired or the link is incorrect.</p>
+      <a routerLink="/orders" class="fb-btn-primary mt-6 inline-flex">View order history</a>
+    </div>
+  } @else {
+    <div class="mx-auto max-w-3xl">
+      <div class="text-center">
+        <span class="grid mx-auto h-14 w-14 place-items-center rounded-2xl bg-leaf-100 text-leaf-700">
+          <span class="material-symbols-outlined text-3xl filled">check_circle</span>
+        </span>
+        <h1 class="mt-6 font-display text-3xl font-semibold text-ink">Thank you for your order</h1>
+        <p class="mt-2 text-ink-soft">
+          We accepted your basket. Payment, inventory, and notifications are processing in parallel.
+        </p>
+      </div>
+
+      @if (shopperEmail()) {
+        <div
+          class="fb-card mt-8 flex gap-3 border-leaf-200 bg-leaf-50/70 p-4 sm:p-5"
+          role="status"
+        >
+          <span class="material-symbols-outlined text-leaf-700">mail</span>
+          <div class="min-w-0 text-sm">
+            <p class="font-semibold text-ink">
+              @if (notificationDone()) {
+                Order & delivery details sent
+              } @else {
+                Sending order & delivery details…
+              }
+            </p>
+            <p class="mt-1 text-ink-soft">
+              A confirmation email is on its way to
+              <span class="font-medium text-ink">{{ shopperEmail() }}</span>
+              via Amazon SES (async Notification consumer).
+            </p>
+          </div>
+        </div>
+      }
+      <div class="fb-card mt-10 grid gap-4 p-6 sm:grid-cols-3 sm:p-8">
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-wide text-ink-soft">Order number</p>
+          <p class="mt-1 font-mono text-sm font-semibold text-ink">{{ order()!.orderId }}</p>
+        </div>
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-wide text-ink-soft">Estimated delivery</p>
+          <p class="mt-1 text-sm font-medium text-ink">
+            {{ order()!.estimatedDelivery | date: 'medium' }}
+          </p>
+        </div>
+        <div>
+          <p class="text-xs font-semibold uppercase tracking-wide text-ink-soft">Status</p>
+          <span
+            class="mt-1 inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold"
+            [class.bg-leaf-100]="order()!.status === 'Completed'"
+            [class.text-leaf-800]="order()!.status === 'Completed'"
+            [class.bg-amber-50]="order()!.status === 'Processing' || order()!.status === 'Pending'"
+            [class.text-amber-800]="order()!.status === 'Processing' || order()!.status === 'Pending'"
+          >
+            {{ order()!.status }}
+          </span>
+        </div>
+      </div>
+
+      <div class="mt-8 flex justify-between text-sm">
+        <span class="text-ink-soft">Total</span>
+        <span class="font-display text-xl font-semibold text-ink">{{
+          order()!.totalAmount | currency: order()!.currency
+        }}</span>
+      </div>
+
+      <section class="fb-card mt-10 p-6 sm:p-8">
+        <h2 class="font-semibold text-ink">Live processing timeline</h2>
+        <p class="mt-1 text-sm text-ink-soft">
+          Watch each downstream consumer complete—just like EventBridge and SQS in production.
+        </p>
+        <div class="mt-6">
+          <app-event-timeline [steps]="timeline()" />
+        </div>
+      </section>
+
+      <div class="mt-8 flex flex-wrap justify-center gap-3">
+        <a routerLink="/shop" class="fb-btn-secondary">Continue shopping</a>
+        <a routerLink="/orders" class="fb-btn-primary">All orders</a>
+      </div>
+    </div>
+  }
+</div>

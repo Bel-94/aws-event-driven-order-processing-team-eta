@@ -1,0 +1,111 @@
+<div class="fb-container py-10 fb-animate-in">
+  <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+    <div>
+      <h1 class="font-display text-3xl font-semibold text-ink">Operations</h1>
+      <p class="mt-1 text-sm text-ink-soft">Store pulse—orders, revenue, and pipeline health at a glance.</p>
+    </div>
+    <a routerLink="/architecture" class="fb-btn-secondary text-sm">View architecture</a>
+  </div>
+
+  <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <article class="fb-card p-5">
+      <p class="text-xs font-semibold uppercase tracking-wide text-ink-soft">Today</p>
+      <p class="mt-2 font-display text-3xl font-semibold text-ink">{{ metrics().todaysOrders }}</p>
+      <p class="mt-1 text-xs text-ink-soft">Orders placed</p>
+    </article>
+    <article class="fb-card p-5">
+      <p class="text-xs font-semibold uppercase tracking-wide text-ink-soft">Pending</p>
+      <p class="mt-2 font-display text-3xl font-semibold text-ink">{{ metrics().pendingOrders }}</p>
+      <p class="mt-1 text-xs text-ink-soft">Awaiting completion</p>
+    </article>
+    <article class="fb-card p-5">
+      <p class="text-xs font-semibold uppercase tracking-wide text-ink-soft">Revenue</p>
+      <p class="mt-2 font-display text-3xl font-semibold text-ink">{{ metrics().revenue | currency: 'USD' }}</p>
+      <p class="mt-1 text-xs text-ink-soft">All time (non-cancelled)</p>
+    </article>
+    <article class="fb-card p-5">
+      <p class="text-xs font-semibold uppercase tracking-wide text-ink-soft">Inventory</p>
+      <p class="mt-2 font-display text-3xl font-semibold text-warn">{{ metrics().inventoryAlerts }}</p>
+      <p class="mt-1 text-xs text-ink-soft">Low-stock alerts</p>
+    </article>
+  </div>
+
+  <div class="mt-8 grid gap-6 lg:grid-cols-2">
+    <section class="fb-card p-6">
+      <h2 class="font-semibold text-ink">Revenue by day</h2>
+      <div class="mt-6 flex items-end justify-between gap-2" style="height: 160px">
+        @for (day of metrics().revenueByDay; track day.day) {
+          <div class="flex flex-1 flex-col items-center gap-2">
+            <div class="relative flex w-full flex-1 items-end justify-center">
+              <div
+                class="w-full max-w-[36px] rounded-t-lg bg-leaf-600 transition-all"
+                [style.height.%]="barHeight(day.amount, revenueMax())"
+                [attr.title]="day.amount | currency: 'USD'"
+              ></div>
+            </div>
+            <span class="text-[11px] font-medium text-ink-soft">{{ day.day }}</span>
+          </div>
+        }
+      </div>
+    </section>
+
+    <section class="fb-card p-6">
+      <h2 class="font-semibold text-ink">Status distribution</h2>
+      <div class="mt-6 h-4 w-full overflow-hidden rounded-full bg-mist">
+        <div class="flex h-full w-full">
+          @for (slice of metrics().statusDistribution; track slice.label) {
+            <div
+              class="h-full transition-all"
+              [style.width.%]="statusWidth(slice.value, statusTotal())"
+              [style.background-color]="slice.color"
+              [attr.title]="slice.label + ': ' + slice.value"
+            ></div>
+          }
+        </div>
+      </div>
+      <ul class="mt-4 space-y-2 text-sm">
+        @for (slice of metrics().statusDistribution; track slice.label) {
+          <li class="flex items-center justify-between">
+            <span class="flex items-center gap-2 text-ink-soft">
+              <span class="h-2.5 w-2.5 rounded-full" [style.background-color]="slice.color"></span>
+              {{ slice.label }}
+            </span>
+            <span class="font-medium text-ink">{{ slice.value }}</span>
+          </li>
+        }
+      </ul>
+    </section>
+  </div>
+
+  <section class="fb-card mt-8 overflow-hidden">
+    <div class="border-b border-line px-6 py-4">
+      <h2 class="font-semibold text-ink">Recent orders</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full min-w-[640px] text-left text-sm">
+        <thead class="bg-mist text-xs uppercase tracking-wide text-ink-soft">
+          <tr>
+            <th class="px-6 py-3 font-semibold">Order</th>
+            <th class="px-6 py-3 font-semibold">Created</th>
+            <th class="px-6 py-3 font-semibold">Status</th>
+            <th class="px-6 py-3 font-semibold text-right">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (order of metrics().recentOrders; track order.orderId) {
+            <tr class="border-t border-line hover:bg-leaf-50/40">
+              <td class="px-6 py-3 font-mono text-xs">{{ order.orderId }}</td>
+              <td class="px-6 py-3 text-ink-soft">{{ order.createdAt | date: 'short' }}</td>
+              <td class="px-6 py-3">
+                <span class="rounded-full bg-leaf-100 px-2 py-0.5 text-xs font-semibold text-leaf-800">{{
+                  order.status
+                }}</span>
+              </td>
+              <td class="px-6 py-3 text-right font-medium">{{ order.totalAmount | currency: order.currency }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>

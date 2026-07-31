@@ -37,6 +37,19 @@ Parameters:
       and injects secret ARNs into Payment and Notification env vars.
       Deploy data_security.yaml first.
 
+  # Verified SES identity (sandbox requires From AND To to be verified).
+  NotificationFromEmail:
+    Type: String
+    Default: ""
+    Description: SES From address (must be a verified identity).
+
+  NotificationDefaultToEmail:
+    Type: String
+    Default: ""
+    Description: >
+      Fallback To address when OrderPlaced has no customerEmail.
+      In SES sandbox this must also be verified.
+
 Conditions:
   SecretsEnabled: !Equals [!Ref AttachSecretsPolicy, "true"]
 
@@ -116,6 +129,17 @@ Resources:
                   - sqs:ChangeMessageVisibility
                 Resource:
                   - Fn::ImportValue: !Sub "${SQSStackName}-NotificationQueueArn"
+        - PolicyName: NotificationSESSend
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: SendOrderConfirmationEmail
+                Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                # Scoped by verified identities in SES; sandbox further limits recipients.
+                Resource: "*"
 
   # ---------------------------------------------------------------------------
   # Payment
@@ -183,8 +207,8 @@ Resources:
     Properties:
       FunctionName: !Sub "notification-${Environment}"
       Description: >
-        Reads OrderPlaced events from SQS and sets notificationStatus=SENT.
-        Failed messages are retried by SQS and eventually moved to the DLQ.
+        Reads OrderPlaced from SQS, sends confirmation email via Amazon SES,
+        then sets notificationStatus=SENT. Failures retry via SQS then DLQ.
       Runtime: nodejs20.x
       Handler: index.handler
       Role: !GetAtt NotificationExecutionRole.Arn
@@ -201,6 +225,8 @@ Resources:
             - SecretsEnabled
             - Fn::ImportValue: !Sub "${ProjectName}-${Environment}-notification-secret-arn"
             - ""
+          SES_FROM_EMAIL: !Ref NotificationFromEmail
+          SES_DEFAULT_TO_EMAIL: !Ref NotificationDefaultToEmail
       Code:
         ZipFile: |
           exports.handler = async () => ({ ok: true, message: "placeholder" });

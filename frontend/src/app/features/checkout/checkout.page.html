@@ -1,0 +1,96 @@
+<div class="fb-container py-10 fb-animate-in">
+  <h1 class="font-display text-3xl font-semibold text-ink">Checkout</h1>
+  <p class="mt-1 text-sm text-ink-soft">Delivery details and payment. Your order publishes to the cloud pipeline on submit.</p>
+
+  @if (cart.items().length === 0) {
+    <div class="fb-card mt-8 p-8 text-center">
+      <p class="text-ink-soft">Nothing to checkout yet.</p>
+      <a routerLink="/shop" class="fb-btn-primary mt-4 inline-flex">Shop now</a>
+    </div>
+  } @else {
+    <div class="mt-8 grid gap-8 lg:grid-cols-[1fr_320px]">
+      <form class="space-y-6" [formGroup]="form" (ngSubmit)="submit()">
+        <section class="fb-card p-6">
+          <h2 class="font-semibold text-ink">Delivery</h2>
+          <div class="mt-4 space-y-4">
+            <div>
+              <label class="fb-label" for="address">Delivery address</label>
+              <textarea
+                id="address"
+                rows="3"
+                class="fb-input resize-y"
+                formControlName="deliveryAddress"
+              ></textarea>
+              @if (form.controls.deliveryAddress.touched && form.controls.deliveryAddress.invalid) {
+                <p class="mt-1 text-xs text-warn">Address is required.</p>
+              }
+            </div>
+            <div>
+              <label class="fb-label" for="phone">Phone</label>
+              <input id="phone" type="tel" class="fb-input" formControlName="phone" />
+              @if (form.controls.phone.touched && form.controls.phone.invalid) {
+                <p class="mt-1 text-xs text-warn">Enter a valid phone number.</p>
+              }
+            </div>
+            <div>
+              <label class="fb-label" for="instructions">Delivery instructions (optional)</label>
+              <input id="instructions" type="text" class="fb-input" formControlName="instructions" />
+            </div>
+          </div>
+        </section>
+
+        <section class="fb-card p-6">
+          <h2 class="font-semibold text-ink">Payment method</h2>
+          <div class="mt-4 grid gap-2 sm:grid-cols-3">
+            @for (method of paymentMethods; track method.value) {
+              <label
+                class="flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 transition"
+                [class.border-leaf-500]="form.controls.paymentMethod.value === method.value"
+                [class.bg-leaf-50]="form.controls.paymentMethod.value === method.value"
+                [class.border-line]="form.controls.paymentMethod.value !== method.value"
+              >
+                <input
+                  type="radio"
+                  class="sr-only"
+                  formControlName="paymentMethod"
+                  [value]="method.value"
+                />
+                <span class="material-symbols-outlined text-leaf-700">{{ method.icon }}</span>
+                <span class="text-sm font-medium text-ink">{{ method.label }}</span>
+              </label>
+            }
+          </div>
+        </section>
+
+        <button type="submit" class="fb-btn-primary w-full sm:w-auto !px-8" [disabled]="placing()">
+          @if (placing()) {
+            <span class="material-symbols-outlined animate-spin text-[20px]">progress_activity</span>
+            Placing order…
+          } @else {
+            Place order · {{ cart.total() | currency: 'USD' }}
+          }
+        </button>
+      </form>
+
+      <aside class="fb-card h-fit p-6">
+        <h2 class="font-semibold text-ink">{{ cart.count() }} items</h2>
+        <ul class="mt-4 max-h-64 space-y-3 overflow-y-auto text-sm">
+          @for (item of cart.items(); track item.product.id) {
+            <li class="flex justify-between gap-2 text-ink-soft">
+              <span class="truncate">{{ item.quantity }}× {{ item.product.name }}</span>
+              <span class="shrink-0 font-medium text-ink">{{
+                item.product.price * item.quantity | currency: item.product.currency
+              }}</span>
+            </li>
+          }
+        </ul>
+        <div class="mt-4 border-t border-line pt-4 text-sm">
+          <div class="flex justify-between font-semibold text-ink">
+            <span>Total</span>
+            <span>{{ cart.total() | currency: 'USD' }}</span>
+          </div>
+        </div>
+      </aside>
+    </div>
+  }
+</div>

@@ -1,0 +1,111 @@
+@if (cart.drawerOpen()) {
+  <div class="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label="Shopping cart">
+    <button
+      type="button"
+      class="absolute inset-0 bg-ink/35 backdrop-blur-[2px]"
+      (click)="cart.closeDrawer()"
+      aria-label="Close cart backdrop"
+    ></button>
+
+    <aside class="fb-drawer-panel relative flex h-full w-full max-w-md flex-col bg-white shadow-2xl">
+      <div class="flex items-center justify-between border-b border-line px-5 py-4">
+        <div>
+          <h2 class="font-display text-xl font-semibold">Your cart</h2>
+          <p class="text-sm text-ink-soft">{{ cart.count() }} item{{ cart.count() === 1 ? '' : 's' }}</p>
+        </div>
+        <button type="button" class="rounded-lg p-2 hover:bg-mist" (click)="cart.closeDrawer()" aria-label="Close cart">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+
+      <div class="flex-1 overflow-y-auto px-5 py-4">
+        @if (cart.items().length === 0) {
+          <div class="flex h-full flex-col items-center justify-center gap-3 text-center">
+            <span class="material-symbols-outlined text-4xl text-leaf-500">shopping_bag</span>
+            <p class="font-medium text-ink">Your bag is empty</p>
+            <p class="max-w-xs text-sm text-ink-soft">Browse fresh produce and staples, then check out without waiting on every backend service.</p>
+            <a routerLink="/shop" class="fb-btn-primary mt-2" (click)="cart.closeDrawer()">Start shopping</a>
+          </div>
+        } @else {
+          <ul class="space-y-4">
+            @for (item of cart.items(); track item.product.id) {
+              <li class="flex gap-3">
+                <img
+                  [src]="item.product.imageUrl"
+                  [alt]="item.product.name"
+                  class="h-20 w-20 rounded-xl object-cover"
+                  loading="lazy"
+                />
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-start justify-between gap-2">
+                    <div>
+                      <p class="truncate font-semibold">{{ item.product.name }}</p>
+                      <p class="text-xs text-ink-soft">{{ item.product.weight }}</p>
+                    </div>
+                    <button
+                      type="button"
+                      class="text-ink-soft hover:text-warn"
+                      (click)="cart.remove(item.product.id)"
+                      [attr.aria-label]="'Remove ' + item.product.name"
+                    >
+                      <span class="material-symbols-outlined text-[18px]">delete</span>
+                    </button>
+                  </div>
+                  <div class="mt-3 flex items-center justify-between">
+                    <div class="inline-flex items-center rounded-lg border border-line">
+                      <button
+                        type="button"
+                        class="px-2 py-1 text-ink-soft hover:bg-mist"
+                        (click)="cart.setQuantity(item.product.id, item.quantity - 1)"
+                        aria-label="Decrease quantity"
+                      >
+                        −
+                      </button>
+                      <span class="min-w-8 text-center text-sm font-semibold">{{ item.quantity }}</span>
+                      <button
+                        type="button"
+                        class="px-2 py-1 text-ink-soft hover:bg-mist"
+                        (click)="cart.setQuantity(item.product.id, item.quantity + 1)"
+                        aria-label="Increase quantity"
+                      >
+                        +
+                      </button>
+                    </div>
+                    <p class="text-sm font-semibold">
+                      {{ item.product.price * item.quantity | currency: item.product.currency }}
+                    </p>
+                  </div>
+                </div>
+              </li>
+            }
+          </ul>
+        }
+      </div>
+
+      @if (cart.items().length > 0) {
+        <div class="border-t border-line bg-mist/60 px-5 py-5">
+          <dl class="space-y-2 text-sm">
+            <div class="flex justify-between text-ink-soft">
+              <dt>Subtotal</dt>
+              <dd>{{ cart.subtotal() | currency: 'USD' }}</dd>
+            </div>
+            <div class="flex justify-between text-ink-soft">
+              <dt>Delivery</dt>
+              <dd>{{ cart.deliveryFee() === 0 ? 'Free' : (cart.deliveryFee() | currency: 'USD') }}</dd>
+            </div>
+            <div class="flex justify-between border-t border-line pt-2 text-base font-semibold text-ink">
+              <dt>Total</dt>
+              <dd>{{ cart.total() | currency: 'USD' }}</dd>
+            </div>
+          </dl>
+          <a
+            routerLink="/checkout"
+            class="fb-btn-primary mt-4 w-full"
+            (click)="cart.closeDrawer()"
+            >Proceed to checkout</a
+          >
+        </div>
+      }
+    </aside>
+  </div>
+}

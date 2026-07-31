@@ -1,0 +1,56 @@
+<div class="fb-container py-10 fb-animate-in">
+  <p class="text-xs font-semibold uppercase tracking-[0.16em] text-leaf-700">Platform</p>
+  <h1 class="mt-2 font-display text-3xl font-semibold text-ink">Event-driven grocery on AWS</h1>
+  <p class="mt-3 max-w-2xl text-ink-soft leading-relaxed">
+    FreshBasket separates fast checkout from slow side effects. Click a service to see how it fits,
+    then follow the request path from browser to parallel consumers.
+  </p>
+
+  <section class="fb-card mt-10 overflow-x-auto p-6">
+    <h2 class="text-sm font-semibold text-ink">Request flow</h2>
+    <div class="mt-6 flex min-w-[640px] flex-wrap items-center gap-2 text-xs font-medium">
+      @for (node of flow; track node; let last = $last) {
+        <span class="rounded-lg border border-line bg-white px-3 py-2 text-ink">{{ node }}</span>
+        @if (!last) {
+          <span class="material-symbols-outlined text-ink-soft">arrow_forward</span>
+        }
+      }
+    </div>
+    <p class="mt-4 text-sm text-ink-soft">
+      <strong class="font-medium text-ink">Hosting:</strong>
+      Amplify Hosting builds and serves the SPA and attaches CloudFront for HTTPS, edge caching,
+      and global delivery. API calls still go to API Gateway—Amplify is for the website, not the
+      order pipeline.
+    </p>
+  </section>
+
+  <div class="mt-10 grid gap-6 lg:grid-cols-[1fr_340px]">
+    <div class="grid gap-3 sm:grid-cols-2">
+      @for (svc of services; track svc.id) {
+        <button
+          type="button"
+          class="fb-card p-5 text-left transition"
+          [class.ring-2]="activeId() === svc.id"
+          [class.ring-leaf-500]="activeId() === svc.id"
+          (click)="select(svc.id)"
+        >
+          <span class="grid h-10 w-10 place-items-center rounded-xl bg-leaf-50 text-leaf-700">
+            <span class="material-symbols-outlined">{{ svc.icon }}</span>
+          </span>
+          <h3 class="mt-3 font-semibold text-ink">{{ svc.name }}</h3>
+          <p class="mt-1 text-sm text-ink-soft">{{ svc.summary }}</p>
+        </button>
+      }
+    </div>
+
+    <aside class="fb-card h-fit p-6 lg:sticky lg:top-24">
+      @if (activeService(); as svc) {
+        <h2 class="font-semibold text-ink">{{ svc.name }}</h2>
+        <p class="mt-3 text-sm leading-relaxed text-ink-soft">{{ svc.detail }}</p>
+      } @else {
+        <p class="text-sm text-ink-soft">Select a service card to read how FreshBasket uses it.</p>
+      }
+      <a routerLink="/shop" class="fb-btn-primary mt-6 inline-flex w-full justify-center">Shop the demo</a>
+    </aside>
+  </div>
+</div>

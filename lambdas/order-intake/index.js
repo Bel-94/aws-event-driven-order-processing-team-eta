@@ -12,10 +12,36 @@ const TABLE_NAME = process.env.ORDERS_TABLE_NAME;
 const EVENT_BUS_NAME = process.env.EVENT_BUS_NAME;
 const EVENT_SOURCE = process.env.EVENT_SOURCE || "order.processing";
 
+const ALLOWED_ORIGINS = (
+  process.env.CORS_ALLOWED_ORIGINS ||
+  "https://main.d1lubsio53fudu.amplifyapp.com,http://127.0.0.1:4200,http://localhost:4200"
+)
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 const client = new DynamoDBClient({});
 const docClient = DynamoDBDocumentClient.from(client);
 const eventBridge = new EventBridgeClient({});
 
+function responseHeaders(event) {
+  const origin = event?.headers?.origin || event?.headers?.Origin || "";
+  const allowOrigin = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  return {
+    "Content-Type": "application/json",
+    "Access-Control-Allow-Origin": allowOrigin,
+    "Access-Control-Allow-Headers": "Content-Type,Authorization",
+    "Access-Control-Allow-Methods": "OPTIONS,POST",
+  };
+}
+
+function jsonResponse(event, statusCode, body) {
+  return {
+    statusCode,
+    headers: responseHeaders(event),
+    body: JSON.stringify(body),
+  };
+}
 // ---------------------------------------------------------------------------
 // SECTION 1 — Validation
 // ---------------------------------------------------------------------------
@@ -112,6 +138,9 @@ function buildOrderItem(body) {
   return {
     orderId,
     customerId: body.customerId.trim(),
+    ...(typeof body.customerEmail === "string" && body.customerEmail.trim()
+      ? { customerEmail: body.customerEmail.trim().toLowerCase() }
+      : {}),
     items: body.items,
     status: "PENDING",
     totalAmount: parseFloat(totalAmount.toFixed(2)),
@@ -159,30 +188,27 @@ async function publishOrderPlaced(orderItem) {
 exports.handler = async (event) => {
   console.log("Incoming request:", JSON.stringify(event, null, 2));
 
+  // Browser preflight from Amplify / local Angular
+  if (event.httpMethod === "OPTIONS") {
+    return {
+      statusCode: 204,
+      headers: responseHeaders(event),
+      body: "",
+    };
+  }
+
   let body;
   try {
     body = JSON.parse(event.body || "{}");
   } catch (parseError) {
     console.warn("Failed to parse request body:", parseError.message);
-    return {
-      statusCode: 400,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: "Request body is not valid JSON",
-      }),
-    };
+    return jsonResponse(event, 400, { message: "Request body is not valid JSON" });
   }
 
   const validation = validateOrder(body);
   if (!validation.valid) {
     console.warn("Validation failed:", validation.message);
-    return {
-      statusCode: 400,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: validation.message,
-      }),
-    };
+    return jsonResponse(event, 400, { message: validation.message });
   }
 
   const orderItem = buildOrderItem(body);
@@ -200,22 +226,12 @@ exports.handler = async (event) => {
     console.error("DynamoDB write failed:", dbError);
 
     if (dbError.name === "ConditionalCheckFailedException") {
-      return {
-        statusCode: 409,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: "An order with this ID already exists",
-        }),
-      };
+      return jsonResponse(event, 409, { message: "An order with this ID already exists" });
     }
 
-    return {
-      statusCode: 500,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: "Failed to save the order. Please try again.",
-      }),
-    };
+    return jsonResponse(event, 500, {
+      message: "Failed to save the order. Please try again.",
+    });
   }
 
   console.log("Order written to DynamoDB successfully. orderId:", orderItem.orderId);
@@ -224,27 +240,19 @@ exports.handler = async (event) => {
     await publishOrderPlaced(orderItem);
   } catch (publishError) {
     console.error("EventBridge publish failed after DynamoDB write:", publishError);
-    return {
-      statusCode: 500,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message:
-          "Order was saved but OrderPlaced event failed to publish. Check EVENT_BUS_NAME and IAM events:PutEvents.",
-        orderId: orderItem.orderId,
-      }),
-    };
+    return jsonResponse(event, 500, {
+      message:
+        "Order was saved but OrderPlaced event failed to publish. Check EVENT_BUS_NAME and IAM events:PutEvents.",
+      orderId: orderItem.orderId,
+    });
   }
 
-  return {
-    statusCode: 201,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      orderId: orderItem.orderId,
-      status: orderItem.status,
-      totalAmount: orderItem.totalAmount,
-      currency: orderItem.currency,
-      createdAt: orderItem.createdAt,
-      eventPublished: true,
-    }),
-  };
+  return jsonResponse(event, 201, {
+    orderId: orderItem.orderId,
+    status: orderItem.status,
+    totalAmount: orderItem.totalAmount,
+    currency: orderItem.currency,
+    createdAt: orderItem.createdAt,
+    eventPublished: true,
+  });
 };

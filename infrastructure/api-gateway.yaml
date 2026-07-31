@@ -127,6 +127,10 @@ Resources:
           customerId:
             type: string
             minLength: 1
+          customerEmail:
+            type: string
+            minLength: 3
+            description: Optional shopper email for SES confirmation (Notification consumer)
           currency:
             type: string
             pattern: "^[A-Z]{3}$"
@@ -177,16 +181,43 @@ Resources:
               - !Ref OrderIntakeFunctionArn
               - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${OrderIntakeFunctionName}"
 
+  # Browser preflight for Amplify / local SPA calling POST /orders
+  OrdersOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref OrdersRestApi
+      ResourceId: !Ref OrdersResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      ApiKeyRequired: false
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization'"
+              method.response.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Headers: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Origin: true
+
   OrdersApiDeployment:
     Type: AWS::ApiGateway::Deployment
     DependsOn:
       - OrdersPostMethod
+      - OrdersOptionsMethod
       - OrdersCognitoAuthorizer
       - OrdersRequestValidator
       - CreateOrderModel
     Properties:
       RestApiId: !Ref OrdersRestApi
-      Description: !Sub "Deploy ${ProjectName} orders API (auth + validation)"
+      Description: !Sub "Deploy ${ProjectName} orders API (auth + validation + CORS)"
 
   OrdersApiStage:
     Type: AWS::ApiGateway::Stage

@@ -1,0 +1,63 @@
+<header
+  class="sticky top-0 z-40 border-b border-line/80 bg-white/80 backdrop-blur-xl"
+>
+  <div class="fb-container flex h-16 items-center justify-between gap-4">
+    <a routerLink="/" class="group flex items-center gap-2.5" aria-label="FreshBasket home">
+      <span
+        class="grid h-9 w-9 place-items-center rounded-xl bg-leaf-600 text-white shadow-sm transition group-hover:bg-leaf-700"
+      >
+        <span class="material-symbols-outlined text-[20px]">nutrition</span>
+      </span>
+      <span class="leading-tight">
+        <span class="block font-display text-lg font-semibold tracking-tight text-ink"
+          >FreshBasket</span
+        >
+        <span class="hidden text-[11px] text-ink-soft sm:block">Fresh groceries. Smarter checkout.</span>
+      </span>
+    </a>
+
+    <nav class="hidden items-center gap-1 md:flex" aria-label="Primary">
+      @for (link of links; track link.path) {
+        @if (!link.auth || auth.isAuthenticated()) {
+          <a
+            [routerLink]="link.path"
+            routerLinkActive="text-leaf-700 bg-leaf-50"
+            class="rounded-lg px-3 py-2 text-sm font-medium text-ink-soft transition hover:bg-leaf-50 hover:text-leaf-700"
+            >{{ link.label }}</a
+          >
+        }
+      }
+    </nav>
+
+    <div class="flex items-center gap-1.5">
+      @if (auth.isAuthenticated()) {
+        <a
+          routerLink="/profile"
+          class="fb-btn-ghost hidden sm:inline-flex"
+          [attr.aria-label]="'Account for ' + auth.user()?.name"
+        >
+          <span class="material-symbols-outlined">person</span>
+          <span class="max-w-28 truncate">{{ auth.user()?.name }}</span>
+        </a>
+      } @else {
+        <a routerLink="/sign-in" class="fb-btn-ghost hidden sm:inline-flex">Sign in</a>
+        <a routerLink="/sign-up" class="fb-btn-primary hidden sm:inline-flex">Create account</a>
+      }
+
+      <button
+        type="button"
+        class="relative rounded-xl p-2.5 text-ink-soft transition hover:bg-leaf-50 hover:text-leaf-700"
+        (click)="cart.toggleDrawer()"
+        aria-label="Open shopping cart"
+      >
+        <span class="material-symbols-outlined">shopping_bag</span>
+        @if (cart.count() > 0) {
+          <span
+            class="absolute -right-0.5 -top-0.5 grid h-5 min-w-5 place-items-center rounded-full bg-leaf-600 px-1 text-[10px] font-bold text-white"
+            >{{ cart.count() }}</span
+          >
+        }
+      </button>
+    </div>
+  </div>
+</header>

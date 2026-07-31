@@ -1,0 +1,33 @@
+<footer class="mt-auto border-t border-line bg-ink text-white">
+  <div class="fb-container grid gap-10 py-14 md:grid-cols-[1.4fr_1fr_1fr]">
+    <div>
+      <p class="font-display text-2xl font-semibold">FreshBasket</p>
+      <p class="mt-3 max-w-sm text-sm leading-relaxed text-white/65">
+        Groceries that check out the way cloud systems should—accept the order, then let payment,
+        inventory, and notifications run on their own.
+      </p>
+    </div>
+    <div>
+      <p class="text-xs font-semibold uppercase tracking-[0.14em] text-white/45">Explore</p>
+      <ul class="mt-4 space-y-2 text-sm text-white/75">
+        <li><a routerLink="/shop" class="hover:text-white">Shop</a></li>
+        <li><a routerLink="/architecture" class="hover:text-white">AWS architecture</a></li>
+        <li><a routerLink="/sign-up" class="hover:text-white">Create account</a></li>
+      </ul>
+    </div>
+    <div>
+      <p class="text-xs font-semibold uppercase tracking-[0.14em] text-white/45">Built on AWS</p>
+      <ul class="mt-4 space-y-2 text-sm text-white/75">
+        <li>API Gateway · Lambda · EventBridge</li>
+        <li>SQS · DynamoDB · Cognito</li>
+        <li>Amplify Hosting · CloudFront · CloudWatch</li>
+      </ul>
+    </div>
+  </div>
+  <div class="border-t border-white/10">
+    <div class="fb-container flex flex-wrap items-center justify-between gap-3 py-5 text-xs text-white/45">
+      <span>© {{ year }} FreshBasket. Event-driven grocery checkout.</span>
+      <span>Designed for resilience under peak demand.</span>
+    </div>
+  </div>
+</footer>

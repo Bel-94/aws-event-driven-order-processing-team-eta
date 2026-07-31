@@ -1,0 +1,146 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", Georgia, serif;
+
+  --color-leaf-50: #f3faf6;
+  --color-leaf-100: #e3f5eb;
+  --color-leaf-200: #c5e9d5;
+  --color-leaf-300: #96d4b3;
+  --color-leaf-400: #5bb588;
+  --color-leaf-500: #2f9a66;
+  --color-leaf-600: #1b7a4e;
+  --color-leaf-700: #166140;
+  --color-leaf-800: #144d34;
+  --color-leaf-900: #113f2c;
+
+  --color-ink: #141916;
+  --color-ink-soft: #3d4741;
+  --color-mist: #f5f7f6;
+  --color-line: #e4ebe6;
+  --color-warn: #c2410c;
+  --color-ok: #0f766e;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-mist text-ink font-sans antialiased;
+    margin: 0;
+  }
+
+  ::selection {
+    @apply bg-leaf-200 text-ink;
+  }
+
+  a {
+    @apply text-inherit no-underline;
+  }
+
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-leaf-600;
+  }
+}
+
+@layer components {
+  .fb-container {
+    @apply mx-auto w-full max-w-6xl px-5 sm:px-8;
+  }
+
+  .fb-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition duration-200;
+  }
+
+  .fb-btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition duration-200 bg-leaf-600 text-white shadow-sm hover:bg-leaf-700 active:scale-[0.98];
+  }
+
+  .fb-btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition duration-200 border border-line bg-white text-ink hover:border-leaf-300 hover:bg-leaf-50;
+  }
+
+  .fb-btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold transition duration-200 text-ink-soft hover:bg-white/70 hover:text-ink;
+  }
+
+  .fb-card {
+    @apply rounded-2xl border border-line bg-white shadow-[0_10px_40px_-28px_rgba(20,25,22,0.45)];
+  }
+
+  .fb-input {
+    @apply w-full rounded-xl border border-line bg-white px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-soft/50 transition focus:border-leaf-400 focus:ring-2 focus:ring-leaf-100;
+  }
+
+  .fb-label {
+    @apply mb-1.5 block text-sm font-medium text-ink-soft;
+  }
+
+  .fb-chip {
+    @apply inline-flex items-center rounded-full border border-line bg-white px-3 py-1 text-xs font-medium text-ink-soft transition hover:border-leaf-300 hover:text-leaf-700;
+  }
+
+  .fb-chip-active {
+    @apply border-leaf-600 bg-leaf-600 text-white hover:border-leaf-600 hover:text-white;
+  }
+
+  .material-symbols-outlined {
+    font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+    font-size: 1.25rem;
+    line-height: 1;
+    user-select: none;
+  }
+
+  .material-symbols-outlined.filled {
+    font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 24;
+  }
+}
+
+@keyframes fb-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fb-pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@keyframes fb-drawer-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.fb-animate-in {
+  animation: fb-fade-up 0.45s ease both;
+}
+
+.fb-pulse {
+  animation: fb-pulse-soft 1.4s ease-in-out infinite;
+}
+
+.fb-drawer-panel {
+  animation: fb-drawer-in 0.28s ease both;
+}

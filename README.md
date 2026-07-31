@@ -1,181 +1,401 @@
-# Event-Driven Order Processing on AWS
+# FreshBasket — Event-Driven Order Processing on AWS
 
-A serverless order processing system built on AWS. The project explores how event-driven architecture works in practice - how services communicate through events rather than calling each other directly, and why that makes a system easier to scale, maintain, and recover from failure.
+**Fresh groceries. Smarter checkout.**
 
-The project runs across three weeks, with each week building on the previous week.
+FreshBasket is a cloud-native grocery checkout platform that demonstrates how **event-driven architecture on AWS** solves a real business problem: peak-hour orders must stay fast and reliable even when payment, inventory, and notifications move at different speeds.
 
----
+This repository contains:
 
-## Why event-driven
+- A production-style **serverless backend** (API Gateway, Lambda, DynamoDB, EventBridge, SQS, SES, Cognito, WAF, and more)
+- A polished **Angular storefront** hosted on **AWS Amplify Hosting** (CloudFront CDN + HTTPS)
+- Infrastructure as Code (CloudFormation), deployment guides, and a live demo path
 
-The typical approach to order processing is one function that does everything in sequence: validate, charge, update stock, send a confirmation. That works until something slows down or breaks. A slow email step holds up the whole order. A bug in inventory can roll back a payment. You are also running a server around the clock regardless of how much traffic you actually have.
-
-With an event-driven approach, the system stores the order and fires a single event. From that point, separate services react independently. Payment does not wait on notifications. Inventory does not care what payment is doing. Each part can fail and retry on its own without taking down anything else. That independence is what this project is about.
-
----
-
-## Architecture
-
-![Architecture Diagram](images/new_architecture.png)
+**Live storefront:** [https://main.d1lubsio53fudu.amplifyapp.com](https://main.d1lubsio53fudu.amplifyapp.com)
 
 ---
 
-## Weekly breakdown
+## Table of contents
 
-### Week 1 - Foundation
+1. [Business objective](#1-business-objective)
+2. [The problem we are solving](#2-the-problem-we-are-solving)
+3. [Our solution](#3-our-solution)
+4. [End-to-end architecture](#4-end-to-end-architecture)
+5. [What a shopper experiences](#5-what-a-shopper-experiences)
+6. [How an order moves through AWS](#6-how-an-order-moves-through-aws)
+7. [AWS Well-Architected Framework](#7-aws-well-architected-framework)
+8. [Trade-offs and design decisions](#8-trade-offs-and-design-decisions)
+9. [How we built it over two weeks](#9-how-we-built-it-over-two-weeks)
+10. [Repository map](#10-repository-map)
+11. [Quick start for beginners](#11-quick-start-for-beginners)
+12. [Further reading](#12-further-reading)
 
-![Week 1 Architecture](images/new_week_one.png)
+---
 
-The first week focused on getting the core order flow working end to end. A customer sends a request, the system validates it, and the order lands in the database.
+## 1. Business objective
 
-**What was built**
+Build an online grocery checkout that:
 
-API Gateway exposes the `POST /orders` endpoint. The Order Intake Lambda receives the request, validates it, and writes the order to DynamoDB with a status of `PENDING`. IAM permissions are scoped so the Lambda can only write to that specific table.
+- Feels **instant** to the customer at busy times (evenings, weekends, promotions)
+- Remains **correct** when payment, stock reservation, and email confirmations finish at different times
+- Stays **available** if one downstream service is slow or fails
+- Is **secure by default** (authenticated API, encrypted data, edge protection)
+- Can be **explained clearly** to both technical judges and non-engineers
 
-**Quick start**
+In short: prove that a modern AWS serverless design is not “complexity for its own sake,” but a deliberate fit for asynchronous business workflows.
 
-Deploy the stacks in this order from CloudShell:
+---
+
+## 2. The problem we are solving
+
+Many grocery and retail platforms still process checkout **synchronously** on a single request path:
+
+```text
+Browser → Server → Charge card → Update inventory → Send email → Response
+```
+
+That model creates three painful failure modes during peak shopping hours:
+
+| Failure mode | What the customer feels | Business impact |
+| --- | --- | --- |
+| One slow step | Long spinner / timeouts | Abandoned carts |
+| Partial success | Paid but stock not reserved (or the reverse) | Support tickets, refunds, lost trust |
+| Notification outage | Checkout blocked because email/SMS failed | Lost sales for a non-critical step |
+
+A single “do everything” server (or one fat Lambda) couples latency and failure domains that should be independent.
+
+**FreshBasket’s premise:** checkout should **accept and record** the order quickly. Everything else should react to that fact as an event.
+
+---
+
+## 3. Our solution
+
+### Product name
+
+**FreshBasket** — a demo grocery storefront backed by an event-driven AWS pipeline.
+
+### Design in one sentence
+
+> When a shopper places an order, the system writes the order and publishes `OrderPlaced`. Payment, inventory, and notification services consume that event independently, update DynamoDB on their own timelines, and never block the original checkout response.
+
+### High-level request path
+
+```text
+Shopper browser
+    → Amazon CloudFront (via Amplify Hosting)
+        → Angular SPA (S3 origin managed by Amplify)
+            → Amazon API Gateway (Cognito JWT + validation + WAF)
+                → Order Intake Lambda
+                    → Amazon DynamoDB (order record)
+                    → Amazon EventBridge (OrderPlaced)
+                        → Payment Lambda
+                        → Inventory Lambda
+                        → SQS → Notification Lambda → Amazon SES (email)
+```
+
+### Why this is better for grocery checkout
+
+- **Customer latency** depends only on intake (validate + write + publish), not on email providers or inventory backends.
+- **Loose coupling** lets teams (or Lambdas) evolve payment and notifications separately.
+- **Resilience** means a failed email goes to a Dead Letter Queue (DLQ); the order still exists.
+- **Scale** is per-function and per-queue, not “scale the whole monolith.”
+
+---
+
+## 4. End-to-end architecture
+
+### Full system view
+
+![FreshBasket end-to-end architecture](images/new_architecture.png)
+
+### Interactive request flow (in the app)
+
+The Architecture page in the storefront walks judges through the same path with clickable AWS service cards:
+
+![Request flow in the FreshBasket Architecture page](images/request-flow.png)
+
+### Frontend hosting path (Amplify + CloudFront)
+
+```text
+Browser → AWS Amplify Hosting → CloudFront (HTTPS, edge cache) → Angular SPA
+SPA API calls → API Gateway → Lambda (separate origin from the website)
+```
+
+Amplify Hosting is how we **build and publish** the website. CloudFront is the **CDN** Amplify attaches for global HTTPS delivery. Order traffic does **not** go through Amplify; it goes to API Gateway.
+
+---
+
+## 5. What a shopper experiences
+
+These screenshots are from the live Amplify deployment.
+
+### Landing
+
+Brand-first grocery experience with a clear path into shopping and into the architecture story.
+
+![FreshBasket landing page](images/landing-page.png)
+
+### Sign-in / welcome
+
+Authenticated sessions use **Amazon Cognito**. After a successful sign-in, the UI greets the shopper by name.
+
+![Welcome message after Cognito sign-in](images/user-welcome-message.png)
+
+### Order success + live processing timeline
+
+Checkout returns immediately. The success page visualizes asynchronous consumers completing independently — the same story EventBridge tells in the cloud.
+
+![Order success page with event-driven processing timeline](images/order-success-timeline.png)
+
+### Email confirmation (Amazon SES)
+
+The Notification Lambda sends a transactional confirmation after `OrderPlaced` (via SQS), without holding up checkout.
+
+![Order confirmation email from FreshBasket](images/email-confirming-order.png)
+
+### Order history
+
+Shoppers can review previous orders and statuses from the authenticated Orders view.
+
+![Customer order history](images/customer-order-history.png)
+
+### Operations pulse (demo console)
+
+An authenticated **Ops** view summarizes order volume, revenue, and status mix for the presentation. Treat it as an internal pulse board for the demo, not the primary shopper journey.
+
+![Operations dashboard](images/operations.png)
+
+---
+
+## 6. How an order moves through AWS
+
+### Step-by-step (beginner-friendly)
+
+1. **Shopper authenticates** with Cognito and receives a JWT (ID token).
+2. **Browser calls** `POST /orders` on API Gateway with `Authorization: Bearer <token>`.
+3. **API Gateway** checks the JWT, validates the JSON body, applies throttling, and (with WAF) filters common web exploits.
+4. **Order Intake Lambda** validates business rules, writes the order to **DynamoDB** (`status: PENDING`), and publishes **`OrderPlaced`** on a custom **EventBridge** bus.
+5. **API returns `201`** with `orderId` and `eventPublished: true` — the customer is done waiting.
+6. **EventBridge rules** fan the same event out to:
+   - Payment consumer Lambda → sets `paymentStatus = PROCESSED`
+   - Inventory consumer Lambda → sets `inventoryStatus = RESERVED`
+   - Notification path → **SQS queue** → Notification Lambda → **SES email** → sets `notificationStatus = SENT`
+7. If notification processing fails repeatedly, the message lands in a **Dead Letter Queue** for inspection — not in the customer’s checkout spinner.
+
+### Event contract
+
+The shared contract is documented in [`docs/event-schema.md`](docs/event-schema.md). At a minimum, `OrderPlaced` carries `orderId`, `customerId`, optional `customerEmail`, line items, totals, and timestamps.
+
+---
+
+## 7. AWS Well-Architected Framework
+
+We used the Well-Architected pillars as a checklist while hardening the system — not as decoration.
+
+### Operational Excellence
+
+| Practice | How FreshBasket applies it |
+| --- | --- |
+| Infrastructure as Code | CloudFormation templates under `infrastructure/` |
+| Observability | CloudWatch logs/metrics; optional access logging / dashboards (`observability.yaml`) |
+| Runbooks | Deployment and demo docs under `docs/` |
+| Safe failure handling | SQS retries + DLQ for notifications |
+
+### Security
+
+| Practice | How FreshBasket applies it |
+| --- | --- |
+| Identity | Amazon Cognito user pool + API Gateway JWT authorizer |
+| Edge protection | AWS WAF on the API stage; Shield Standard baseline |
+| Encryption | KMS CMK option for DynamoDB; Secrets Manager for consumer credentials |
+| Least privilege | Per-function IAM roles; reviewed in [`docs/PERMISSIONS.md`](docs/PERMISSIONS.md) |
+| Transport | HTTPS only for API Gateway and Amplify/CloudFront site |
+| Vulnerability awareness | Amazon Inspector on Lambda packages |
+
+### Reliability
+
+| Practice | How FreshBasket applies it |
+| --- | --- |
+| Decoupled failure domains | EventBridge fan-out to independent consumers |
+| Buffering | SQS between EventBridge and Notification |
+| Retry / poison messages | SQS redrive to DLQ |
+| Stateless compute | Lambda scales with concurrency, no single always-on server |
+
+### Performance Efficiency
+
+| Practice | How FreshBasket applies it |
+| --- | --- |
+| Right-sized async work | Checkout path stays thin; heavy/side effects are async |
+| Edge delivery | CloudFront in front of the SPA |
+| Managed data store | DynamoDB for single-digit millisecond order key access |
+| Elastic consumers | Each Lambda scales on its own workload |
+
+### Cost Optimization
+
+| Practice | How FreshBasket applies it |
+| --- | --- |
+| Pay per use | Lambda, API Gateway, EventBridge, SQS — little idle cost |
+| No always-on checkout servers | No EC2 fleet for intake |
+| Managed services | Less undifferentiated ops work (patching OS fleets, etc.) |
+
+### Sustainability
+
+| Practice | How FreshBasket applies it |
+| --- | --- |
+| Efficient utilization | Event-driven scale-to-zero when traffic is quiet |
+| Managed efficiency | AWS-operated data centers and managed services |
+
+---
+
+## 8. Trade-offs and design decisions
+
+Senior architecture is honest about what you give up.
+
+| Decision | Benefit | Trade-off / cost |
+| --- | --- | --- |
+| Event-driven fan-out instead of one sync transaction | Resilience, speed, independent scale | Eventual consistency — UI must show “processing” then catch up |
+| SQS in front of Notification only | DLQ story, retry isolation for email | Payment/Inventory can still be direct targets; not every path is identically buffered |
+| DynamoDB single-table style order record | Simple key access, cheap reads/writes | Cross-entity analytics need other patterns (streams, warehouse) later |
+| Cognito + API Gateway authorizer | Strong identity boundary | Demo accounts and SES sandbox rules need careful setup |
+| SES for email | Native AWS transactional mail | Sandbox limits recipients until production access is approved |
+| Amplify Hosting for SPA | Fast HTTPS deploy with CloudFront | Website and API are separate origins (CORS must be correct) |
+| Simulated payment/inventory logic | Clear teaching surface for events | Not a PCI payment integration or real WMS |
+| Ops dashboard in the SPA | Great for demos | Not a full multi-tenant admin RBAC product (yet) |
+
+### Why not “just one server”?
+
+A single server (or one synchronous function) is simpler on day one. It becomes fragile the moment email latency, inventory locks, and payment gateways share the customer’s critical path. FreshBasket keeps **servers where they belong** (short-lived Lambdas) but refuses to make the shopper wait on every downstream system.
+
+### Why EventBridge instead of only SNS/SQS or Step Functions?
+
+- **EventBridge** gives a clean business event bus (`OrderPlaced`) with fan-out rules — ideal for “many independent reactions.”
+- **SQS** adds durability/retry where we wanted an explicit DLQ teaching moment (notifications).
+- **Step Functions** would shine for a long, ordered saga with compensations; our primary demo is **parallel side effects**, not a multi-step state machine.
+
+---
+
+## 9. How we built it over two weeks
+
+Early planning sketches used a three-phase roadmap. Delivery was compressed into **two focused weeks**: first stand up the event-driven core, then harden it and ship the FreshBasket customer experience.
+
+![Delivery plan (compressed into two weeks)](images/three_week_plan.png)
+
+### Week 1 — Foundation + event-driven core
+
+![Foundation architecture](images/new_week_one.png)
+
+![Event-driven core architecture](images/new_week_two.png)
+
+- API Gateway `POST /orders` → Order Intake Lambda → DynamoDB
+- Least-privilege IAM for intake
+- Custom EventBridge bus + `OrderPlaced`
+- Payment, Inventory, and Notification consumer Lambdas
+- Cognito authentication on the API
+- Request validation, throttling, HTTPS
+- KMS / Secrets Manager foundations
+
+Guides: [`docs/lambda-order-intake-deployment.md`](docs/lambda-order-intake-deployment.md), [`docs/eventbridge-deployment.md`](docs/eventbridge-deployment.md), [`docs/auth-api-security.md`](docs/auth-api-security.md)
+
+### Week 2 — Production readiness + FreshBasket experience
+
+![Hardened production architecture](images/new_week_three.png)
+
+- SQS + DLQ for Notification
+- WAF (+ Shield Standard baseline)
+- Inspector
+- CMK / Secrets wiring on consumers
+- FreshBasket Angular UI on Amplify Hosting (CloudFront HTTPS)
+- SES order confirmation email from the Notification Lambda
+- End-to-end demo path (auth → checkout → timeline → inbox)
+
+Guides: [`docs/sqs-dlq-inspector-deployment.md`](docs/sqs-dlq-inspector-deployment.md), [`docs/waf-shield.md`](docs/waf-shield.md), [`docs/ses-email-notifications.md`](docs/ses-email-notifications.md), [`frontend/README.md`](frontend/README.md)
+
+### Services by week
+
+| Week | Focus | Services / capabilities |
+| --- | --- | --- |
+| 1 | Intake + event bus + auth | API Gateway, Lambda, DynamoDB, IAM, EventBridge, consumer Lambdas, Cognito, KMS, Secrets Manager, CloudWatch |
+| 2 | Resilience + product surface | SQS, DLQ, WAF, Shield Standard, Inspector, Amplify/CloudFront SPA, SES email notifications |
+
+---
+
+## 10. Repository map
+
+```text
+.
+├── amplify.yml                 # Amplify Hosting build for /frontend
+├── frontend/                   # Angular FreshBasket SPA
+├── docs/                       # Deployment, security, demo, schemas
+├── images/                     # Architecture diagrams + UI screenshots
+├── infrastructure/             # CloudFormation templates
+└── lambdas/
+    ├── order-intake/
+    ├── payment-processor/
+    ├── inventory-update/
+    └── notification/           # SQS consumer → SES + DynamoDB status
+```
+
+---
+
+## 11. Quick start for beginners
+
+### A. Explore the live app (no deploy needed)
+
+1. Open [https://main.d1lubsio53fudu.amplifyapp.com](https://main.d1lubsio53fudu.amplifyapp.com)
+2. Create an account (Cognito emails a verification code) **or** sign in with a provisioned demo user
+3. Add groceries → checkout → watch the processing timeline
+4. Confirm the SES email (recipient must be allowed by SES sandbox/production rules)
+
+Demo notes: [`docs/demo-script.md`](docs/demo-script.md), [`docs/demo-auth-email.md`](docs/demo-auth-email.md)
+
+### B. Run the frontend locally
 
 ```bash
-# 1. DynamoDB
-aws cloudformation deploy \
-  --template-file infrastructure/dynamodb.yaml \
-  --stack-name order-processing-db \
-  --parameter-overrides Environment=dev
-
-# 2. Lambda
-aws cloudformation deploy \
-  --template-file infrastructure/lambda-order-intake.yaml \
-  --stack-name order-processing-lambda \
-  --parameter-overrides Environment=dev DynamoDBStackName=order-processing-db \
-  --capabilities CAPABILITY_NAMED_IAM
-
-# Upload function code
-zip -j order-intake.zip lambdas/order-intake/index.js
-aws lambda update-function-code \
-  --function-name order-intake-dev \
-  --zip-file fileb://order-intake.zip
-
-# 3. API Gateway
-LAMBDA_ARN=$(aws cloudformation describe-stacks \
-  --stack-name order-processing-lambda \
-  --query "Stacks[0].Outputs[?OutputKey=='OrderIntakeFunctionArn'].OutputValue" \
-  --output text)
-
-aws cloudformation deploy \
-  --template-file infrastructure/api-gateway.yaml \
-  --stack-name order-processing-api \
-  --parameter-overrides ProjectName=order-processing StageName=dev OrderIntakeFunctionArn=$LAMBDA_ARN
+cd frontend
+npm install
+npm start
 ```
 
-Full deployment steps and testing guide: [`docs/lambda-order-intake-deployment.md`](docs/lambda-order-intake-deployment.md)
+Open `http://127.0.0.1:4200`. Set `useLiveApi: true` in `frontend/src/environments/environment.ts` to hit the real API.
 
----
+### C. Deploy backend stacks (high level)
 
-### Week 2 - Event-Driven Architecture
+Deploy in dependency order (details live in the linked docs):
 
-![Week 2 Architecture](images/new_week_two.png)
-
-The second week introduced EventBridge and transformed the system from a simple request-response flow into a proper event-driven architecture. Security foundations were also added this week.
-
-**What was built**
-
-EventBridge was introduced as the event bus. The Order Intake Lambda now publishes an `OrderPlaced` event after writing to DynamoDB instead of handling everything itself. Three independent consumer Lambdas were added - Payment Processing, Inventory Management, and Notification Service - each reacting to the same event and updating their own status on the order record in DynamoDB.
-
-On the security side, Cognito handles user authentication on the API. KMS encrypts data at rest in DynamoDB. Secrets Manager holds any credentials the Lambdas need at runtime. API Gateway was configured with HTTPS enforcement, request validation, and rate limiting. CloudTrail and CloudWatch were enabled for auditing and monitoring.
-
-**Infrastructure and code**
-
-- Event schema: [`docs/event-schema.md`](docs/event-schema.md)
-- EventBridge bus and rules: `infrastructure/eventbridge.yaml`
-- Consumer Lambdas stack: `infrastructure/consumers.yaml`
-- Consumer Lambda code: `lambdas/payment-processor/`, `lambdas/inventory-update/`, `lambdas/notification/`
-- Auth and API security: `infrastructure/cognito.yaml`, [`docs/auth-api-security.md`](docs/auth-api-security.md)
-- EventBridge deployment guide: [`docs/eventbridge-deployment.md`](docs/eventbridge-deployment.md)
-
----
-
-### Week 3 - Production Readiness
-
-![Week 3 Architecture](images/new_week_three.png)
-
-The final week focused on resilience and hardening the system for production workloads.
-
-**What was built**
-
-SQS was added as a buffer between EventBridge and the Notification Lambda. Instead of EventBridge calling the Lambda directly, it now puts the event onto a queue. The Lambda reads from the queue in batches. If a message fails after three attempts, SQS moves it to a Dead Letter Queue automatically so nothing is silently lost. IAM policies were reviewed and tightened across all functions.
-
-Amazon Inspector was enabled to continuously scan the Lambda function packages for known vulnerabilities in their dependencies. Scans run automatically whenever a new function version is deployed. AWS WAF was added to protect the API against common web attacks, and Shield Standard provides baseline DDoS protection.
-
-**Infrastructure and code**
-
-- SQS queue and DLQ: `infrastructure/sqs-dlq.yaml`
-- Inspector enablement: `infrastructure/inspector.yaml`
-- WAF + Shield notes: `infrastructure/waf.yaml`, [`docs/waf-shield.md`](docs/waf-shield.md)
-- Data security wiring: CMK on DynamoDB + secrets attach on consumers (`dynamodb.yaml`, `consumers.yaml`, `data_security.yaml`)
-- Updated EventBridge (routes Notification to SQS): `infrastructure/eventbridge.yaml`
-- Updated consumers stack (Notification Lambda reads from SQS): `infrastructure/consumers.yaml`
-- Updated Notification Lambda code: `lambdas/notification/index.js`
-- IAM before/after review: [`docs/PERMISSIONS.md`](docs/PERMISSIONS.md)
-- Solo finish checklist: [`docs/completion-checklist.md`](docs/completion-checklist.md)
-- Full SQS/DLQ/Inspector deploy guide: [`docs/sqs-dlq-inspector-deployment.md`](docs/sqs-dlq-inspector-deployment.md)
-
----
-
-## Services across all three weeks
-
-| Week | Services added |
-|---|---|
-| 1 | API Gateway, Lambda, DynamoDB, IAM |
-| 2 | EventBridge, Consumer Lambdas, Cognito, KMS, Secrets Manager, CloudTrail, CloudWatch |
-| 3 | SQS, Dead Letter Queue, Inspector, WAF, Shield Standard |
-
----
-
-## Repository structure
-
-```
-.
-├── docs/
-│   ├── lambda-order-intake-deployment.md
-│   ├── eventbridge-deployment.md
-│   ├── auth-api-security.md
-│   ├── sqs-dlq-inspector-deployment.md
-│   ├── event-schema.md
-│   ├── PERMISSIONS.md
-│   └── schemas/
-│       └── order-placed.schema.json
-├── images/
-│   ├── new_architecture.png
-│   ├── new_week_one.png
-│   ├── new_week_two.png
-│   └── new_week_three.png
-├── lambdas/
-│   ├── order-intake/
-│   │   └── index.js
-│   ├── payment-processor/
-│   │   └── index.js
-│   ├── inventory-update/
-│   │   └── index.js
-│   └── notification/
-│       └── index.js
-└── infrastructure/
-    ├── dynamodb.yaml
-    ├── lambda-order-intake.yaml
-    ├── api-gateway.yaml
-    ├── eventbridge.yaml
-    ├── consumers.yaml
-    ├── sqs-dlq.yaml
-    ├── inspector.yaml
-    ├── cognito.yaml
-    ├── data_security.yaml
-    ├── observability.yaml
-    ├── team-access.yaml
-    └── parameters.example.txt
+```text
+data_security
+  → dynamodb
+  → cognito
+  → sqs-dlq
+  → consumers
+  → eventbridge
+  → lambda-order-intake
+  → api-gateway
+  → waf
+  → (optional) observability, inspector
 ```
 
+Then upload each Lambda zip (`npm install --omit=dev`, zip `index.js` + `node_modules`).
+
+Solo checklist: [`docs/completion-checklist.md`](docs/completion-checklist.md)
+
 ---
 
-## Challenges
+## 12. Further reading
 
-We will update this section as and when we face challenges with the project.
+| Topic | Document |
+| --- | --- |
+| Order intake deploy & test | [`docs/lambda-order-intake-deployment.md`](docs/lambda-order-intake-deployment.md) |
+| EventBridge & consumers | [`docs/eventbridge-deployment.md`](docs/eventbridge-deployment.md) |
+| Cognito / API security | [`docs/auth-api-security.md`](docs/auth-api-security.md) |
+| SQS / DLQ / Inspector | [`docs/sqs-dlq-inspector-deployment.md`](docs/sqs-dlq-inspector-deployment.md) |
+| WAF & Shield | [`docs/waf-shield.md`](docs/waf-shield.md) |
+| SES notifications | [`docs/ses-email-notifications.md`](docs/ses-email-notifications.md) |
+| IAM before/after | [`docs/PERMISSIONS.md`](docs/PERMISSIONS.md) |
+| Event schema | [`docs/event-schema.md`](docs/event-schema.md) |
+| Frontend / Amplify | [`frontend/README.md`](frontend/README.md) |
+
+---
+
+## Closing thought
+
+FreshBasket is not “Lambda for Lambda’s sake.” It is a grocery checkout shaped around a business truth: **acceptance, payment, inventory, and communication are related facts that should not share a single failure and latency domain.** EventBridge, SQS, and independent consumers make that truth operational on AWS — in a way that aligns with the Well-Architected Framework and stays explainable from first principles to a working demo.

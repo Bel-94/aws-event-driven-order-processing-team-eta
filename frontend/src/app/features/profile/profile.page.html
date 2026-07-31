@@ -1,0 +1,56 @@
+<div class="fb-container py-10 fb-animate-in">
+  @if (!user()) {
+    <div class="fb-card p-8 text-center">
+      <p class="text-ink-soft">Sign in to view your profile.</p>
+      <a routerLink="/sign-in" class="fb-btn-primary mt-4 inline-flex">Sign in</a>
+    </div>
+  } @else {
+    <h1 class="font-display text-3xl font-semibold text-ink">Account</h1>
+    <p class="mt-1 text-sm text-ink-soft">Manage your details and delivery addresses.</p>
+
+    <div class="mt-8 grid gap-6 lg:grid-cols-2">
+      <section class="fb-card p-6">
+        <h2 class="font-semibold text-ink">Profile</h2>
+        <dl class="mt-4 space-y-4 text-sm">
+          <div>
+            <dt class="text-xs font-semibold uppercase tracking-wide text-ink-soft">Name</dt>
+            <dd class="mt-1 font-medium text-ink">{{ user()!.name }}</dd>
+          </div>
+          <div>
+            <dt class="text-xs font-semibold uppercase tracking-wide text-ink-soft">Email</dt>
+            <dd class="mt-1 font-medium text-ink">{{ user()!.email }}</dd>
+          </div>
+          @if (user()!.phone) {
+            <div>
+              <dt class="text-xs font-semibold uppercase tracking-wide text-ink-soft">Phone</dt>
+              <dd class="mt-1 font-medium text-ink">{{ user()!.phone }}</dd>
+            </div>
+          }
+        </dl>
+      </section>
+
+      <section class="fb-card p-6">
+        <h2 class="font-semibold text-ink">Saved addresses</h2>
+        @if (user()!.addresses.length) {
+          <ul class="mt-4 space-y-3">
+            @for (addr of user()!.addresses; track addr) {
+              <li class="rounded-xl border border-line bg-mist px-4 py-3 text-sm text-ink-soft">
+                {{ addr }}
+              </li>
+            }
+          </ul>
+        } @else {
+          <p class="mt-4 text-sm text-ink-soft">No saved addresses yet. They appear after checkout.</p>
+        }
+      </section>
+    </div>
+
+    <div class="mt-8 flex flex-wrap gap-3">
+      <a routerLink="/orders" class="fb-btn-secondary">Order history</a>
+      <button type="button" class="fb-btn-ghost text-warn hover:bg-orange-50" (click)="logout()">
+        <span class="material-symbols-outlined">logout</span>
+        Sign out
+      </button>
+    </div>
+  }
+</div>

@@ -45,9 +45,10 @@ Order intake, payment, inventory, notification — `npm install --omit=dev` then
 2. [x] DynamoDB: `paymentStatus=PROCESSED`, `inventoryStatus=RESERVED`, `notificationStatus=SENT`
 3. [ ] Break Notification → message lands in DLQ (optional live; steps in `docs/sqs-dlq-inspector-deployment.md`)
 4. [ ] Show WAF association + CloudWatch dashboard + Inspector console (console walk during presentation)
+5. [ ] SES confirmation email (`docs/ses-email-notifications.md`) — verify identity, place order, open inbox
 
 Full command/script notes: `docs/demo-script.md`
 
 ## 5. Presentation
 
-Problem → live happy path → DLQ failure → security controls (Cognito, WAF, KMS/Secrets, IAM before/after, Inspector) → tradeoffs / next steps.
+Problem → live happy path → SES confirmation email in inbox → DLQ failure → security controls (Cognito, WAF, KMS/Secrets, IAM, Inspector) → tradeoffs / next steps.

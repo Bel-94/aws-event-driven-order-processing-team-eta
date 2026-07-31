@@ -1,0 +1,79 @@
+<div class="fb-container py-10 fb-animate-in">
+  <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div>
+      <h1 class="font-display text-3xl font-semibold text-ink">Shop</h1>
+      <p class="mt-1 text-sm text-ink-soft">Seasonal produce and everyday essentials, delivered fresh.</p>
+    </div>
+    <div class="relative w-full max-w-sm">
+      <span
+        class="material-symbols-outlined pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-soft"
+        >search</span
+      >
+      <input
+        type="search"
+        class="fb-input !pl-10"
+        placeholder="Search products…"
+        [ngModel]="query()"
+        (ngModelChange)="query.set($event)"
+        aria-label="Search products"
+      />
+    </div>
+  </div>
+
+  <div class="mt-6 flex flex-wrap items-center gap-2">
+    @for (cat of categories; track cat) {
+      <button
+        type="button"
+        class="fb-chip"
+        [class.fb-chip-active]="category() === cat"
+        (click)="setCategory(cat)"
+      >
+        {{ cat }}
+      </button>
+    }
+  </div>
+
+  <div class="mt-6 flex items-center justify-between gap-4">
+    <p class="text-sm text-ink-soft">
+      @if (!loading()) {
+        {{ products().length }} items
+      }
+    </p>
+    <label class="flex items-center gap-2 text-sm text-ink-soft">
+      Sort
+      <select class="fb-input !w-auto !py-2" [ngModel]="sort()" (ngModelChange)="sort.set($event)">
+        <option value="featured">Featured</option>
+        <option value="price-asc">Price: low to high</option>
+        <option value="price-desc">Price: high to low</option>
+        <option value="rating">Top rated</option>
+      </select>
+    </label>
+  </div>
+
+  @if (loading()) {
+    <div class="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      @for (_ of [1, 2, 3, 4, 5, 6, 7, 8]; track $index) {
+        <div class="fb-card overflow-hidden">
+          <div class="aspect-[4/3] bg-line fb-pulse"></div>
+          <div class="space-y-3 p-4">
+            <div class="h-3 w-16 rounded bg-line fb-pulse"></div>
+            <div class="h-4 w-3/4 rounded bg-line fb-pulse"></div>
+            <div class="h-4 w-1/2 rounded bg-line fb-pulse"></div>
+          </div>
+        </div>
+      }
+    </div>
+  } @else if (products().length === 0) {
+    <div class="fb-card mt-8 p-10 text-center">
+      <span class="material-symbols-outlined text-4xl text-ink-soft">search_off</span>
+      <p class="mt-3 font-medium text-ink">No matches</p>
+      <p class="mt-1 text-sm text-ink-soft">Try another search or category.</p>
+    </div>
+  } @else {
+    <div class="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      @for (product of products(); track product.id) {
+        <app-product-card [product]="product" />
+      }
+    </div>
+  }
+</div>
