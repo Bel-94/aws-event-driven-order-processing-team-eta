@@ -127,6 +127,10 @@ aws cloudformation deploy \
 
 **Step 4 - Inspector**
 
+CloudFormation has no native `EnableInspector` resource. This stack uses a small
+custom-resource Lambda that calls `inspector2:Enable` for `LAMBDA` and `LAMBDA_CODE`.
+Both deploy commands need `CAPABILITY_NAMED_IAM`.
+
 To enable scanning without email alerts:
 
 ```bash
@@ -135,7 +139,8 @@ aws cloudformation deploy \
   --stack-name order-processing-inspector \
   --parameter-overrides \
     Environment=dev \
-    ProjectName=order-processing
+    ProjectName=order-processing \
+  --capabilities CAPABILITY_NAMED_IAM
 ```
 
 To also get email alerts for HIGH and CRITICAL findings, add your email:
@@ -148,7 +153,7 @@ aws cloudformation deploy \
     Environment=dev \
     ProjectName=order-processing \
     AlertEmail=your@email.com \
-  --capabilities CAPABILITY_IAM
+  --capabilities CAPABILITY_NAMED_IAM
 ```
 
 You will get a confirmation email from AWS SNS after the stack deploys. Click the confirmation link or alerts will not come through.
