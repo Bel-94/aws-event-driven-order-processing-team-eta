@@ -1,34 +1,60 @@
-# IAM Permissions
+# IAM Permissions Review (Week 3)
 
-## Order Intake — `order-intake-execution-role-${Environment}`
+This is the security-story artifact for the final presentation: what we grant, why, and what we tightened.
 
-**Defined in:** `infrastructure/lambda-order-intake.yaml`
+## Before (early Week 1 mindset)
 
-| Permission | Why | Scope |
+| Principal | Typical beginner grant | Risk |
 |---|---|---|
-| `dynamodb:PutItem` | Create order with `status: PENDING` | Orders table ARN only |
-| `events:PutEvents` | Publish `OrderPlaced` after the DynamoDB write | Custom event bus ARN only |
-| `logs:CreateLogGroup` / `CreateLogStream` / `PutLogEvents` | Runtime logs | Via `AWSLambdaBasicExecutionRole` |
+| Order Intake role | `dynamodb:*` on `*` | Can read/delete any table |
+| Consumers | One shared role with broad DynamoDB + maybe `*` | Blast radius across all consumers |
+| API Gateway | No Cognito; open `POST` | Anyone can place orders |
+| Notification | Same role as payment; EventBridge direct invoke | No buffer; shared privileges |
 
-**Not granted to Order Intake:** `UpdateItem`, `Scan`, `Query`, `DeleteItem`, bus-wide wildcards.
+## After (current least privilege)
 
-## Consumers — `order-consumers-execution-role-${Environment}`
+### Order Intake — `order-intake-execution-role-${Environment}`
 
-**Defined in:** `infrastructure/consumers.yaml`  
-Shared by Payment, Inventory, and Notification.
+| Permission | Scope |
+|---|---|
+| `dynamodb:PutItem` | Orders table ARN only |
+| `events:PutEvents` | Custom event bus ARN only |
+| CloudWatch Logs | Via basic execution role |
 
-| Permission | Why | Scope |
-|---|---|---|
-| `dynamodb:UpdateItem` | Each consumer sets its own status attribute | Orders table ARN only |
-| CloudWatch Logs | Debug consumer invocations | Via `AWSLambdaBasicExecutionRole` |
+### Payment + Inventory — `order-consumers-execution-role-${Environment}`
 
-**Not granted to consumers:** `PutItem`, `DeleteItem`, `Scan`, `events:PutEvents`.
+| Permission | Scope |
+|---|---|
+| `dynamodb:UpdateItem` | Orders table ARN only |
+| Secrets policy (optional attach) | Payment + notification secret ARNs + CMK decrypt |
+| CloudWatch Logs | Via basic execution role |
 
-## EventBridge → Lambda invoke
+### Notification — `order-notification-execution-role-${Environment}`
 
-Not an execution-role permission. `infrastructure/eventbridge.yaml` adds `AWS::Lambda::Permission` so `events.amazonaws.com` can invoke each consumer, scoped to the `OrderPlaced` rule ARN.
+| Permission | Scope |
+|---|---|
+| `dynamodb:UpdateItem` | Orders table ARN only |
+| `sqs:ReceiveMessage` / `DeleteMessage` / `GetQueueAttributes` / `ChangeMessageVisibility` | Notification queue ARN only |
+| Secrets policy (optional attach) | Same managed policy from data_security |
+| CloudWatch Logs | Via basic execution role |
 
-## PoLP notes
+### Resource policies (not execution roles)
 
-- Consumers update **different attributes** (`paymentStatus`, `inventoryStatus`, `notificationStatus`) so they do not overwrite each other.
-- Tighten logs further (function-scoped log ARNs) and split consumer roles per function during the Week 3 IAM review if desired.
+| Policy | Purpose |
+|---|---|
+| API Gateway → Lambda invoke | Only this API can invoke Order Intake |
+| EventBridge → Payment/Inventory invoke | Only OrderPlaced rule can invoke |
+| EventBridge → SQS SendMessage | Queue accepts EventBridge events |
+| Cognito authorizer on `POST /orders` | JWT required |
+
+## PoLP decisions called out in the demo
+
+1. **Create vs update split** — Intake can only `PutItem`; consumers can only `UpdateItem`.
+2. **Notification isolated** — SQS permissions are not on the payment/inventory role.
+3. **No Scan/Query/Delete** on Orders for any Lambda in this project.
+4. **Secrets via managed policy** — consumers read specific secret ARNs, not `secretsmanager:*`.
+5. **Known tradeoff** — Payment and Inventory still share one role, so Inventory inherits unused secrets access when `AttachSecretsPolicy=true`. Splitting payment into its own role is a natural follow-up.
+
+## Known logging tradeoff
+
+`AWSLambdaBasicExecutionRole` allows logs on `arn:aws:logs:*:*:*`. Acceptable for the demo; a stricter design scopes log ARNs per function (see earlier Order Intake notes).

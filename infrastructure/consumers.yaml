@@ -12,6 +12,11 @@ Parameters:
     Default: dev
     AllowedValues: [dev, staging, prod]
 
+  ProjectName:
+    Type: String
+    Default: order-processing
+    Description: Must match ProjectName used by data_security.yaml exports.
+
   DynamoDBStackName:
     Type: String
     Default: order-processing-db
@@ -22,6 +27,18 @@ Parameters:
     Description: >
       Name of the SQS/DLQ stack. Used to import the notification queue ARN
       for the event source mapping and IAM permissions.
+
+  AttachSecretsPolicy:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >
+      When true, attaches the data_security consumer secrets managed policy
+      and injects secret ARNs into Payment and Notification env vars.
+      Deploy data_security.yaml first.
+
+Conditions:
+  SecretsEnabled: !Equals [!Ref AttachSecretsPolicy, "true"]
 
 Resources:
 
@@ -39,8 +56,11 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      ManagedPolicyArns: !If
+        - SecretsEnabled
+        - - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+          - Fn::ImportValue: !Sub "${ProjectName}-${Environment}-consumer-secrets-policy-arn"
+        - - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
         - PolicyName: ConsumersDynamoDBUpdate
           PolicyDocument:
@@ -53,7 +73,7 @@ Resources:
                   - Fn::ImportValue: !Sub "${DynamoDBStackName}-OrdersTableArn"
 
   # ---------------------------------------------------------------------------
-  # Separate execution role for Notification — needs SQS read permissions
+  # Separate execution role for Notification - needs SQS read permissions
   # on top of DynamoDB write and basic logging.
   # ---------------------------------------------------------------------------
   NotificationExecutionRole:
@@ -67,8 +87,11 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      ManagedPolicyArns: !If
+        - SecretsEnabled
+        - - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+          - Fn::ImportValue: !Sub "${ProjectName}-${Environment}-consumer-secrets-policy-arn"
+        - - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
         - PolicyName: NotificationDynamoDBUpdate
           PolicyDocument:
@@ -112,6 +135,10 @@ Resources:
           ORDERS_TABLE_NAME:
             Fn::ImportValue: !Sub "${DynamoDBStackName}-OrdersTableName"
           CONSUMER_NAME: payment
+          PAYMENT_SECRET_ARN: !If
+            - SecretsEnabled
+            - Fn::ImportValue: !Sub "${ProjectName}-${Environment}-payment-secret-arn"
+            - ""
       Code:
         ZipFile: |
           exports.handler = async () => ({ ok: true, message: "placeholder" });
@@ -170,6 +197,10 @@ Resources:
           ORDERS_TABLE_NAME:
             Fn::ImportValue: !Sub "${DynamoDBStackName}-OrdersTableName"
           CONSUMER_NAME: notification
+          NOTIFICATION_SECRET_ARN: !If
+            - SecretsEnabled
+            - Fn::ImportValue: !Sub "${ProjectName}-${Environment}-notification-secret-arn"
+            - ""
       Code:
         ZipFile: |
           exports.handler = async () => ({ ok: true, message: "placeholder" });

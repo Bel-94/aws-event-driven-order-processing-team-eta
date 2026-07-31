@@ -111,10 +111,14 @@ Amazon Inspector was enabled to continuously scan the Lambda function packages f
 
 - SQS queue and DLQ: `infrastructure/sqs-dlq.yaml`
 - Inspector enablement: `infrastructure/inspector.yaml`
+- WAF + Shield notes: `infrastructure/waf.yaml`, [`docs/waf-shield.md`](docs/waf-shield.md)
+- Data security wiring: CMK on DynamoDB + secrets attach on consumers (`dynamodb.yaml`, `consumers.yaml`, `data_security.yaml`)
 - Updated EventBridge (routes Notification to SQS): `infrastructure/eventbridge.yaml`
 - Updated consumers stack (Notification Lambda reads from SQS): `infrastructure/consumers.yaml`
 - Updated Notification Lambda code: `lambdas/notification/index.js`
-- Full deployment guide including DLQ failure demo: [`docs/sqs-dlq-inspector-deployment.md`](docs/sqs-dlq-inspector-deployment.md)
+- IAM before/after review: [`docs/PERMISSIONS.md`](docs/PERMISSIONS.md)
+- Solo finish checklist: [`docs/completion-checklist.md`](docs/completion-checklist.md)
+- Full SQS/DLQ/Inspector deploy guide: [`docs/sqs-dlq-inspector-deployment.md`](docs/sqs-dlq-inspector-deployment.md)
 
 ---
 
