@@ -1,0 +1,200 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Week 3 - Amazon Inspector v2 for continuous vulnerability scanning of
+  Lambda functions. There is no native CloudFormation "EnableInspector"
+  resource, so a small Lambda custom resource calls the Inspector2 Enable API.
+  Optional SNS alerts for HIGH/CRITICAL findings.
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+
+  ProjectName:
+    Type: String
+    Default: order-processing
+
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: >
+      Email address to receive Inspector finding alerts.
+      Leave empty to skip SNS setup and review findings in the console.
+
+Conditions:
+  CreateSNSAlerts: !Not [!Equals [!Ref AlertEmail, ""]]
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # Custom resource role + function: calls inspector2:Enable
+  # ---------------------------------------------------------------------------
+  InspectorEnableRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${ProjectName}-inspector-enable-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: EnableInspectorV2
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - inspector2:Enable
+                  - inspector2:Disable
+                  - inspector2:BatchGetAccountStatus
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - iam:CreateServiceLinkedRole
+                Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/aws-service-role/inspector2.amazonaws.com/AWSServiceRoleForAmazonInspector2"
+                Condition:
+                  StringLike:
+                    iam:AWSServiceName:
+                      - inspector2.amazonaws.com
+
+  InspectorEnableFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${ProjectName}-inspector-enable-${Environment}"
+      Description: CloudFormation custom resource helper to enable Inspector v2 Lambda scanning
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt InspectorEnableRole.Arn
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import json
+          import urllib3
+          import boto3
+
+          http = urllib3.PoolManager()
+
+          def send(event, context, status, data=None, reason=None):
+              body = json.dumps({
+                  "Status": status,
+                  "Reason": reason or ("See CloudWatch: %s" % context.log_stream_name),
+                  "PhysicalResourceId": event.get("PhysicalResourceId") or "InspectorV2LambdaEnable",
+                  "StackId": event["StackId"],
+                  "RequestId": event["RequestId"],
+                  "LogicalResourceId": event["LogicalResourceId"],
+                  "Data": data or {},
+              }).encode("utf-8")
+              http.request(
+                  "PUT",
+                  event["ResponseURL"],
+                  body=body,
+                  headers={"content-type": "", "content-length": str(len(body))},
+              )
+
+          def handler(event, context):
+              client = boto3.client("inspector2")
+              props = event.get("ResourceProperties", {})
+              resource_types = props.get("ResourceTypes", ["LAMBDA", "LAMBDA_CODE"])
+              request_type = event["RequestType"]
+              try:
+                  if request_type in ("Create", "Update"):
+                      client.enable(resourceTypes=resource_types)
+                      send(
+                          event,
+                          context,
+                          "SUCCESS",
+                          {"EnabledResourceTypes": ",".join(resource_types)},
+                      )
+                  elif request_type == "Delete":
+                      # Leave Inspector enabled on stack delete so other
+                      # demos / accounts are not disrupted unexpectedly.
+                      send(event, context, "SUCCESS", {"Action": "noop-on-delete"})
+              except Exception as exc:
+                  send(event, context, "FAILED", reason=str(exc))
+
+  EnableInspectorV2:
+    Type: Custom::EnableInspectorV2
+    Properties:
+      ServiceToken: !GetAtt InspectorEnableFunction.Arn
+      ResourceTypes:
+        - LAMBDA
+        - LAMBDA_CODE
+
+  # ---------------------------------------------------------------------------
+  # Optional SNS alerts for HIGH / CRITICAL findings
+  # ---------------------------------------------------------------------------
+  InspectorFindingsTopic:
+    Type: AWS::SNS::Topic
+    Condition: CreateSNSAlerts
+    Properties:
+      TopicName: !Sub "${ProjectName}-inspector-findings-${Environment}"
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref AlertEmail
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+        - Key: Week
+          Value: "3"
+
+  InspectorFindingsRule:
+    Type: AWS::Events::Rule
+    Condition: CreateSNSAlerts
+    Properties:
+      Name: !Sub "${ProjectName}-inspector-high-critical-${Environment}"
+      Description: >
+        Forwards HIGH and CRITICAL Inspector findings to the alerts SNS topic.
+      EventBusName: default
+      State: ENABLED
+      EventPattern:
+        source:
+          - aws.inspector2
+        detail-type:
+          - Inspector2 Finding
+        detail:
+          severity:
+            - HIGH
+            - CRITICAL
+          resources:
+            type:
+              - AWS_LAMBDA_FUNCTION
+      Targets:
+        - Id: InspectorFindingsSNS
+          Arn: !Ref InspectorFindingsTopic
+
+  InspectorSNSPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Condition: CreateSNSAlerts
+    Properties:
+      Topics:
+        - !Ref InspectorFindingsTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowEventBridgePublish
+            Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref InspectorFindingsTopic
+
+Outputs:
+  InspectorStatus:
+    Description: Inspector v2 Lambda + Lambda code scanning enablement status
+    Value: !Sub "Inspector v2 enable requested for LAMBDA and LAMBDA_CODE in ${AWS::Region} (${Environment})"
+
+  InspectorEnableFunctionName:
+    Description: Helper Lambda used by CloudFormation to call inspector2:Enable
+    Value: !Ref InspectorEnableFunction
+
+  InspectorFindingsTopicArn:
+    Condition: CreateSNSAlerts
+    Description: SNS topic receiving HIGH and CRITICAL Inspector findings
+    Value: !Ref InspectorFindingsTopic
+    Export:
+      Name: !Sub "${AWS::StackName}-InspectorFindingsTopicArn"

@@ -1,8 +1,10 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  Week 2 — Consumer Lambdas (Payment, Inventory, Notification).
+  Consumer Lambdas (Payment, Inventory, Notification).
   Each reacts independently to OrderPlaced and updates its own status
-  attribute on the Orders table. Wire them to EventBridge via eventbridge.yaml.
+  attribute on the Orders table.
+  Week 3: the Notification Lambda now reads from SQS instead of EventBridge directly.
+  Pass the SQS stack name so this stack can import the queue ARN and URL.
 
 Parameters:
   Environment:
@@ -14,11 +16,18 @@ Parameters:
     Type: String
     Default: order-processing-db
 
-Resources:
-  # ===========================================================================
-  # Shared: least-privilege execution pieces differ only by function name tag
-  # ===========================================================================
+  SQSStackName:
+    Type: String
+    Default: order-processing-sqs
+    Description: >
+      Name of the SQS/DLQ stack. Used to import the notification queue ARN
+      for the event source mapping and IAM permissions.
 
+Resources:
+
+  # ---------------------------------------------------------------------------
+  # Shared execution role for Payment and Inventory (no SQS needed for these)
+  # ---------------------------------------------------------------------------
   ConsumerExecutionRole:
     Type: AWS::IAM::Role
     Properties:
@@ -44,6 +53,48 @@ Resources:
                   - Fn::ImportValue: !Sub "${DynamoDBStackName}-OrdersTableArn"
 
   # ---------------------------------------------------------------------------
+  # Separate execution role for Notification — needs SQS read permissions
+  # on top of DynamoDB write and basic logging.
+  # ---------------------------------------------------------------------------
+  NotificationExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "order-notification-execution-role-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: NotificationDynamoDBUpdate
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource:
+                  - Fn::ImportValue: !Sub "${DynamoDBStackName}-OrdersTableArn"
+        - PolicyName: NotificationSQSConsume
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  # These four are the minimum Lambda needs to poll SQS and
+                  # delete messages it has successfully processed.
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:ChangeMessageVisibility
+                Resource:
+                  - Fn::ImportValue: !Sub "${SQSStackName}-NotificationQueueArn"
+
+  # ---------------------------------------------------------------------------
   # Payment
   # ---------------------------------------------------------------------------
   PaymentProcessorFunction:
@@ -63,14 +114,12 @@ Resources:
           CONSUMER_NAME: payment
       Code:
         ZipFile: |
-          exports.handler = async () => ({ ok: true, message: "placeholder — deploy real code via CLI" });
+          exports.handler = async () => ({ ok: true, message: "placeholder" });
       Tags:
         - Key: Project
           Value: order-processing
         - Key: Week
           Value: "2"
-        - Key: Owner
-          Value: consumer-payment
 
   # ---------------------------------------------------------------------------
   # Inventory
@@ -92,27 +141,29 @@ Resources:
           CONSUMER_NAME: inventory
       Code:
         ZipFile: |
-          exports.handler = async () => ({ ok: true, message: "placeholder — deploy real code via CLI" });
+          exports.handler = async () => ({ ok: true, message: "placeholder" });
       Tags:
         - Key: Project
           Value: order-processing
         - Key: Week
           Value: "2"
-        - Key: Owner
-          Value: consumer-inventory
 
   # ---------------------------------------------------------------------------
-  # Notification (Week 3 will put SQS in front of this function)
+  # Notification — now reads from SQS, not directly from EventBridge
   # ---------------------------------------------------------------------------
   NotificationFunction:
     Type: AWS::Lambda::Function
     Properties:
       FunctionName: !Sub "notification-${Environment}"
-      Description: Simulated notification — sets notificationStatus=SENT
+      Description: >
+        Reads OrderPlaced events from SQS and sets notificationStatus=SENT.
+        Failed messages are retried by SQS and eventually moved to the DLQ.
       Runtime: nodejs20.x
       Handler: index.handler
-      Role: !GetAtt ConsumerExecutionRole.Arn
-      Timeout: 10
+      Role: !GetAtt NotificationExecutionRole.Arn
+      # Timeout must be less than the SQS visibility timeout (60s) to avoid
+      # a message becoming visible again while Lambda is still processing it.
+      Timeout: 30
       MemorySize: 128
       Environment:
         Variables:
@@ -121,14 +172,31 @@ Resources:
           CONSUMER_NAME: notification
       Code:
         ZipFile: |
-          exports.handler = async () => ({ ok: true, message: "placeholder — deploy real code via CLI" });
+          exports.handler = async () => ({ ok: true, message: "placeholder" });
       Tags:
         - Key: Project
           Value: order-processing
         - Key: Week
-          Value: "2"
-        - Key: Owner
-          Value: consumer-notification
+          Value: "3"
+
+  # ---------------------------------------------------------------------------
+  # Event source mapping — connects SQS to the Notification Lambda.
+  # Lambda polls the queue and invokes the function with batches of messages.
+  # BisectBatchOnFunctionError means if the whole batch fails, Lambda splits
+  # it in half and retries each half separately to isolate the bad message.
+  # ---------------------------------------------------------------------------
+  NotificationSQSTrigger:
+    Type: AWS::Lambda::EventSourceMapping
+    Properties:
+      EventSourceArn:
+        Fn::ImportValue: !Sub "${SQSStackName}-NotificationQueueArn"
+      FunctionName: !GetAtt NotificationFunction.Arn
+      BatchSize: 5
+      FunctionResponseTypes:
+        # Tells Lambda to respect the batchItemFailures list returned by the handler
+        # so only failed messages go back for retry, not the whole batch.
+        - ReportBatchItemFailures
+      BisectBatchOnFunctionError: true
 
 Outputs:
   PaymentFunctionArn:
@@ -159,3 +227,8 @@ Outputs:
     Value: !GetAtt ConsumerExecutionRole.Arn
     Export:
       Name: !Sub "${AWS::StackName}-ConsumerRoleArn"
+
+  NotificationRoleArn:
+    Value: !GetAtt NotificationExecutionRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationRoleArn"
