@@ -36,9 +36,7 @@ Resources:
     Properties:
       Name: !Sub "${ProjectName}-api-waf-${Environment}"
       Scope: REGIONAL
-      Description: >
-        Protects POST /orders against common web exploits. Shield Standard
-        (automatic DDoS baseline) applies to API Gateway without extra config.
+      Description: Protects POST /orders against common web exploits. Shield Standard automatic DDoS baseline applies to API Gateway.
       DefaultAction:
         Allow: {}
       VisibilityConfig:

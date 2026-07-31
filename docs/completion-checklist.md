@@ -41,10 +41,12 @@ Order intake, payment, inventory, notification — `npm install --omit=dev` then
 
 ## 4. E2E proof
 
-1. Cognito token → `POST /orders` → 201  
-2. DynamoDB shows payment / inventory / notification statuses  
-3. Break Notification → message lands in DLQ  
-4. Show WAF association + CloudWatch dashboard + Inspector console  
+1. [x] Cognito token → `POST /orders` → 201 (`ord_84b5ae36-...`, `eventPublished: true`)
+2. [x] DynamoDB: `paymentStatus=PROCESSED`, `inventoryStatus=RESERVED`, `notificationStatus=SENT`
+3. [ ] Break Notification → message lands in DLQ (optional live; steps in `docs/sqs-dlq-inspector-deployment.md`)
+4. [ ] Show WAF association + CloudWatch dashboard + Inspector console (console walk during presentation)
+
+Full command/script notes: `docs/demo-script.md`
 
 ## 5. Presentation
 

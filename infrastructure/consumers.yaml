@@ -226,8 +226,8 @@ Resources:
       FunctionResponseTypes:
         # Tells Lambda to respect the batchItemFailures list returned by the handler
         # so only failed messages go back for retry, not the whole batch.
+        # Note: BisectBatchOnFunctionError is for stream sources (Kinesis/DynamoDB), not SQS.
         - ReportBatchItemFailures
-      BisectBatchOnFunctionError: true
 
 Outputs:
   PaymentFunctionArn:
