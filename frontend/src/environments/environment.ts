@@ -22,18 +22,17 @@ export const environment = {
     userPoolClientId: '3ke9ugr3lbmk44gmasfooc8vje',
     region: 'us-east-1',
   },
-  /** Live checkout → API Gateway → EventBridge → SES email. */
-  useLiveApi: true,
+  /**
+   * Backend stacks were torn down. Keep false for Amplify-only UI demos (local mock auth/orders).
+   * Flip to true only after Cognito + API Gateway are redeployed.
+   */
+  useLiveApi: false,
   amplify: {
-    /** Amplify Hosting app URL (CloudFront-backed HTTPS). */
-    appUrl: 'https://main.d1lubsio53fudu.amplifyapp.com',
+    /** Filled after Amplify recreate. */
+    appUrl: 'https://main.ddeqrohhkgyk6.amplifyapp.com',
   },
   cloudFront: {
-    /**
-     * CloudFront distribution Amplify attaches for HTTPS + edge caching.
-     * App URL: https://main.d1lubsio53fudu.amplifyapp.com
-     */
     enabled: true,
-    distributionDomain: 'main.d1lubsio53fudu.amplifyapp.com',
+    distributionDomain: 'main.ddeqrohhkgyk6.amplifyapp.com',
   },
 };

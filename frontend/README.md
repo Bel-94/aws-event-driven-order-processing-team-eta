@@ -4,9 +4,11 @@ Angular 20 SPA for the event-driven grocery checkout demo.
 
 ## Live URL
 
-**https://main.d1lubsio53fudu.amplifyapp.com**
+**https://main.ddeqrohhkgyk6.amplifyapp.com**
 
-Amplify app id: `d1lubsio53fudu` (us-east-1). Hosting uses Amplify + CloudFront HTTPS.
+Amplify app id: `ddeqrohhkgyk6` (us-east-1). Hosting uses Amplify + CloudFront HTTPS.
+
+> Backend stacks are currently torn down. The live site runs in **UI mock mode** (`useLiveApi: false`) so shop/cart/checkout still work without Cognito/API/SES.
 
 ### Demo login (Cognito + SES)
 

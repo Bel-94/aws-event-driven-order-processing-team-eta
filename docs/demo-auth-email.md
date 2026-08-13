@@ -29,4 +29,4 @@
 | `codesrunner@gmail.com` | `DemoPass1!` |
 | `ntinyaribelinda@gmail.com` | `DemoPass1!` |
 
-Site: https://main.d1lubsio53fudu.amplifyapp.com
+Site: https://main.ddeqrohhkgyk6.amplifyapp.com

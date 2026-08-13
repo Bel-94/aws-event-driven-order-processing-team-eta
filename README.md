@@ -10,7 +10,8 @@ This repository contains:
 - A polished **Angular storefront** hosted on **AWS Amplify Hosting** (CloudFront CDN + HTTPS)
 - Infrastructure as Code (CloudFormation), deployment guides, and a live demo path
 
-**Live storefront:** [https://main.d1lubsio53fudu.amplifyapp.com](https://main.d1lubsio53fudu.amplifyapp.com)
+**Live storefront:** [https://main.ddeqrohhkgyk6.amplifyapp.com](https://main.ddeqrohhkgyk6.amplifyapp.com)  
+*(Amplify UI only right now — backend stacks are torn down, so the site runs in mock mode.)*
 
 ---
 
@@ -348,7 +349,7 @@ Guides: [`docs/sqs-dlq-inspector-deployment.md`](docs/sqs-dlq-inspector-deployme
 
 ### A. Explore the live app (no deploy needed)
 
-1. Open [https://main.d1lubsio53fudu.amplifyapp.com](https://main.d1lubsio53fudu.amplifyapp.com)
+1. Open [https://main.ddeqrohhkgyk6.amplifyapp.com](https://main.ddeqrohhkgyk6.amplifyapp.com)
 2. Create an account (Cognito emails a verification code) **or** sign in with a provisioned demo user
 3. Add groceries → checkout → watch the processing timeline
 4. Confirm the SES email (recipient must be allowed by SES sandbox/production rules)
